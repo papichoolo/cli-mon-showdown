@@ -1177,43 +1177,85 @@ class BattleSimulator:
         return pokemon
     
     def select_pokemon(self, is_player: bool = True) -> Pokemon:
-        """Let user search for and select a Pokémon by name (using PokéAPI)"""
-        player_type = "your" if is_player else "opponent"
-        while True:
-            name = input(f"\nEnter the name of {player_type} Pokémon: ").strip().lower()
-            try:
-                pokemon = self.create_pokemon(name)
-                print(f"Selected: {pokemon.name}")
-                return pokemon
-            except requests.HTTPError:
-                print("Pokémon not found on PokéAPI. Please try again.")
-            except Exception as e:
-                print(f"Error: {str(e)}")
+            """Let user search for and select a Pokémon by name (using PokéAPI)"""
+            player_type = "your" if is_player else "opponent"
+            while True:
+                name = input(f"\nEnter the name of {player_type} Pokémon: ").strip().lower()
+                try:
+                    pokemon = self.create_pokemon(name)
+                    print(f"Selected: {pokemon.name}")
+                    
+                    # Set EVs
+                    print("\nSet EVs (Effort Values) for your Pokémon (max 510 total, max 252 per stat):")
+                    evs = {"hp": 0, "attack": 0, "defense": 0, "sp_attack": 0, "sp_defense": 0, "speed": 0}
+                    total_evs = 0
+                    for stat in evs.keys():
+                        while True:
+                            try:
+                                value = int(input(f"Enter EVs for {stat} (current total: {total_evs}/510): "))
+                                if 0 <= value <= 252 and total_evs + value <= 510:
+                                    evs[stat] = value
+                                    total_evs += value
+                                    break
+                                else:
+                                    print("Invalid value. Ensure it's between 0 and 252, and total EVs do not exceed 510.")
+                            except ValueError:
+                                print("Please enter a valid number.")
+                    
+                    # Apply EVs to Pokémon stats
+                    for stat, value in evs.items():
+                        base_stat = getattr(pokemon, stat)
+                        ev_bonus = (value // 4)
+                        setattr(pokemon, stat, base_stat + ev_bonus)
+                    
+                    # Set item
+                    print("\nSelect an item for your Pokémon:")
+                    item_list = list(ITEMS.keys())
+                    for i, item_name in enumerate(item_list[:10]):  # Show first 10 items
+                        item = ITEMS[item_name]
+                        print(f"{i+1}. {item.name} - {item.description}")
+                    
+                    print("11. More items...")
+                    print("0. No item")
+                    
+                    choice = input("Enter choice (0-11): ")
+                    if choice.isdigit() and 1 <= int(choice) <= 10:
+                        pokemon.item = ITEMS[item_list[int(choice) - 1]]
+                        print(f"Item set to {pokemon.item.name}")
+                    elif choice == "0":
+                        pokemon.item = None
+                        print("No item equipped")
+                    
+                    return pokemon
+                except requests.HTTPError:
+                    print("Pokémon not found on PokéAPI. Please try again.")
+                except Exception as e:
+                    print(f"Error: {str(e)}")
 
     
     def start_battle(self):
-        """Start a new battle"""
-        print("🌟 Welcome to Pokemon Battle Simulator! 🌟")
-        print("="*50)
-        
-        # Select Pokemon
-        self.player_pokemon = self.select_pokemon(True)
-        self.opponent_pokemon = self.select_pokemon(False)
-        
-        # Start battle
-        self.battle_loop()
-        
-        # Ask for another battle
-        while True:
-            again = input("\nWould you like to battle again? (y/n): ").lower()
-            if again in ['y', 'yes']:
-                self.start_battle()
-                break
-            elif again in ['n', 'no']:
-                print("Thanks for playing! Goodbye!")
-                break
-            else:
-                print("Please enter 'y' or 'n'")
+            """Start a new battle"""
+            print("🌟 Welcome to Pokemon Battle Simulator! 🌟")
+            print("="*50)
+            
+            # Select Pokemon
+            self.player_pokemon = self.select_pokemon(True)
+            self.opponent_pokemon = self.select_pokemon(False)
+            
+            # Start battle
+            self.battle_loop()
+            
+            # Ask for another battle
+            while True:
+                again = input("\nWould you like to battle again? (y/n): ").lower()
+                if again in ['y', 'yes']:
+                    self.start_battle()
+                    break
+                elif again in ['n', 'no']:
+                    print("Thanks for playing! Goodbye!")
+                    break
+                else:
+                    print("Please enter 'y' or 'n'")
 
 def main():
     """Main function to run the battle simulator"""

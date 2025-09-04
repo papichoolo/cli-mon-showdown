@@ -1,4 +1,3 @@
-
 import random
 import time
 import sys
@@ -445,6 +444,8 @@ class BattleSimulator:
             "sp_defense": apply_nature("sp_defense", ((2 * stats_raw["special-defense"] * level) // 100) + 5),
             "speed": apply_nature("speed", ((2 * stats_raw["speed"] * level) // 100) + 5)
         }
+        # Cap HP at max_hp after stat calculation
+        stats["hp"] = min(stats["hp"], base_hp)
 
         item = ITEMS.get(item_name) if item_name else None
 
@@ -727,7 +728,6 @@ class BattleSimulator:
                     heal_amount = int(user.max_hp * 0.67)
                 elif self.battlefield.weather in [Weather.RAIN, Weather.SANDSTORM, Weather.HAIL]:
                     heal_amount = user.max_hp // 4
-            
             user.hp = min(user.max_hp, user.hp + heal_amount)
             print(f"{user.name} restored {heal_amount} HP!")
         
@@ -1045,11 +1045,9 @@ class BattleSimulator:
                     opponent = self.opponent_pokemon if pokemon == self.player_pokemon else self.player_pokemon
                     opponent.hp = min(opponent.max_hp, opponent.hp + drain)
                     print(f"{pokemon.name}'s HP is sapped by Leech Seed! (-{drain} HP)")
-        
-        # Clear volatile status
-        for pokemon in [self.player_pokemon, self.opponent_pokemon]:
-            if VolatileStatus.FLINCH in pokemon.volatile_status:
-                pokemon.volatile_status.remove(VolatileStatus.FLINCH)
+            # Cap HP at max_hp after all effects
+            if pokemon.hp > pokemon.max_hp:
+                pokemon.hp = pokemon.max_hp
     
     def battle_loop(self):
         """Main battle loop"""
@@ -1288,6 +1286,9 @@ class BattleSimulator:
                             ev_bonus = (value // 4)
                             setattr(pokemon, stat, base_stat + ev_bonus)
                             total_evs += value
+                    # Cap HP at max_hp after EVs
+                    if pokemon.hp > pokemon.max_hp:
+                        pokemon.hp = pokemon.max_hp
                     print(f"[DEBUG] Applied EVs: {evs} (total: {total_evs})")
                 # Set IVs (Individual Values) - for debugging, just print, as stats are already maxed
                 if ivs:

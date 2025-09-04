@@ -1,3 +1,4 @@
+
 import random
 import time
 import sys
@@ -8,6 +9,9 @@ from typing import Dict, List, Optional, Tuple, Any
 from enum import Enum
 from copy import deepcopy
 from test import return_moveset
+# Autocomplete support
+from prompt_toolkit import prompt
+from prompt_toolkit.completion import WordCompleter
 
 # Enums for better type safety
 API = "https://pokeapi.co/api/v2"
@@ -408,15 +412,15 @@ class BattleSimulator:
                 calculated[stat] = int(((2 * base + 31) * level) / 100) + 5
         return calculated
     
-    def create_pokemon(self, name: str, level: int = 100, nature: Optional[str] = None,
+    def create_pokemon(self, name: str, moveset, level: int = 100, nature: Optional[str] = None,
                    ability_index: int = 0, item_name: Optional[str] = None) -> Pokemon:
         """Create a Pokemon instance using live data from PokéAPI"""
         import math
-
+        selected_moves = moveset
         data = fetch_pokemon_data(name)
         stats_raw = {s["stat"]["name"]: s["base_stat"] for s in data["stats"]}
-        selected_moves = return_moveset(info=data, basestats=stats_raw)
-        print(f"Selected moves for {name}: {selected_moves}")
+        #selected_moves = return_moveset(data["name"].lower())
+        #print(f"Selected moves for {name}: {selected_moves}")
         types = [t["type"]["name"] for t in data["types"]]
         moves_available = [m["move"]["name"] for m in data["moves"]]
         #selected_moves = random.sample(moves_available, k=min(4, len(moves_available)))
@@ -445,9 +449,11 @@ class BattleSimulator:
         item = ITEMS.get(item_name) if item_name else None
 
         move_objs = []
-        for move_name in selected_moves:
+        #print(f"Fetching move data for: {selected_moves}")
+        for move_name in selected_moves['moves']:
             try:
                 move_data = fetch_move_data(move_name)
+                #print(move_data)
                 move_objs.append(Move(
                     name=move_data["name"].title().replace("-", " "),
                     type=move_data["type"]["name"],
@@ -877,33 +883,46 @@ class BattleSimulator:
         print("="*60)
     
     def player_turn(self):
-        """Handle player's turn"""
+        """Handle player's turn with autocomplete and struggle support"""
         print(f"\n{self.player_pokemon.name}'s turn!")
-        
         # Check status conditions
         if not self.check_status_prevention(self.player_pokemon):
             return None
-        
+        # Check if all moves are out of PP (Struggle)
+        if all(move.pp == 0 for move in self.player_pokemon.moves):
+            print("All moves are out of PP! {self.player_pokemon.name} used Struggle!")
+            return Move('Struggle', 'Normal', 'Physical', 50, 100, 1, 1, [], 0, True, description="A desperate attack that also hurts the user.")
         print("Choose a move:")
+        move_names = [f"{move.name} ({move.pp}/{move.max_pp} PP)" for move in self.player_pokemon.moves]
+        move_completer = WordCompleter([move.name for move in self.player_pokemon.moves], ignore_case=True)
         for i, move in enumerate(self.player_pokemon.moves):
             pp_text = f"{move.pp}/{move.max_pp} PP"
             priority_text = f" (Priority: {move.priority})" if move.priority != 0 else ""
             print(f"{i+1}. {move.name} ({move.type}, {move.category}, {move.power} power, {pp_text}){priority_text}")
-        
         while True:
             try:
-                choice = int(input("Enter move number (1-4): ")) - 1
-                if 0 <= choice < len(self.player_pokemon.moves):
-                    selected_move = self.player_pokemon.moves[choice]
-                    if selected_move.pp > 0:
-                        selected_move.pp -= 1
-                        return selected_move
+                choice = prompt("Enter move name or number (1-4): ", completer=move_completer).strip()
+                if choice.isdigit():
+                    idx = int(choice) - 1
+                    if 0 <= idx < len(self.player_pokemon.moves):
+                        selected_move = self.player_pokemon.moves[idx]
                     else:
-                        print("That move is out of PP!")
+                        print("Invalid choice! Please choose 1-4.")
+                        continue
                 else:
-                    print("Invalid choice! Please choose 1-4.")
-            except ValueError:
-                print("Please enter a number!")
+                    idx = next((i for i, m in enumerate(self.player_pokemon.moves) if m.name.lower() == choice.lower()), None)
+                    if idx is not None:
+                        selected_move = self.player_pokemon.moves[idx]
+                    else:
+                        print("Invalid move name!")
+                        continue
+                if selected_move.pp > 0:
+                    selected_move.pp -= 1
+                    return selected_move
+                else:
+                    print("That move is out of PP!")
+            except Exception:
+                print("Please enter a valid move name or number!")
     
     def opponent_turn(self):
         """Handle opponent's turn (AI)"""
@@ -931,22 +950,34 @@ class BattleSimulator:
         return selected_move
     
     def execute_move(self, attacker: Pokemon, defender: Pokemon, move: Move):
-        """Execute a move and display results"""
+        """Execute a move and display results, with Struggle and move lock support"""
+        # Move lock (Choice items)
+        if hasattr(attacker, 'locked_move') and attacker.locked_move:
+            if move.name != attacker.locked_move:
+                print(f"{attacker.name} is locked into {attacker.locked_move}!")
+                move = next((m for m in attacker.moves if m.name == attacker.locked_move), move)
+        # Struggle
+        if move.name == 'Struggle':
+            print(f"{attacker.name} used Struggle!")
+            damage = max(1, attacker.max_hp // 4)
+            defender.hp = max(0, defender.hp - damage)
+            print(f"{defender.name} takes {damage} damage!")
+            recoil = max(1, attacker.max_hp // 4)
+            attacker.hp = max(0, attacker.hp - recoil)
+            print(f"{attacker.name} is hurt by recoil! (-{recoil} HP)")
+            time.sleep(0.5)
+            self.print_animated_health_bar(defender)
+            return
         if move.category == 'Status':
             self.execute_status_move(attacker, defender, move)
             return
-        
         result = self.calculate_damage(attacker, defender, move)
-        
         if result[0] == -1:
             print(f"{attacker.name}'s attack missed!")
             return
-        
         damage, is_critical, modifier = result
-        
         if is_critical:
             print("Critical hit!")
-        
         # Type effectiveness message
         type_effectiveness = 1.0
         for defender_type in defender.types:
@@ -955,42 +986,38 @@ class BattleSimulator:
             if capitalized_move_type in TYPE_EFFECTIVENESS:
                 effectiveness = TYPE_EFFECTIVENESS[capitalized_move_type].get(capitalized_defender_type, 1.0)
                 type_effectiveness *= effectiveness
-
         effectiveness_text = self.get_type_effectiveness_text(type_effectiveness)
         if effectiveness_text:
             print(effectiveness_text)
-        
         # Focus Sash check
         if defender.item and defender.item.name == 'Focus Sash' and defender.hp == defender.max_hp and damage >= defender.hp:
             damage = defender.hp - 1
             print(f"{defender.name} held on with Focus Sash!")
             defender.item = None
-        
         # Apply damage
         defender.hp = max(0, defender.hp - damage)
         print(f"{defender.name} takes {damage} damage!")
-        
         # Apply secondary effects
         if defender.hp > 0:
             self.apply_secondary_effects(attacker, defender, move)
-        
         # Apply contact abilities
-        if move.contact and defender.ability.name == 'Static' and random.randint(1, 3) == 1:
+        if move.contact and defender.ability and defender.ability.name == 'Static' and random.randint(1, 3) == 1:
             if attacker.status == StatusCondition.NONE:
                 attacker.status = StatusCondition.PARALYSIS
                 print(f"{attacker.name} was paralyzed by Static!")
-        
-        elif move.contact and defender.ability.name == 'Rough Skin':
+        elif move.contact and defender.ability and defender.ability.name == 'Rough Skin':
             damage = attacker.max_hp // 8
             attacker.hp = max(0, attacker.hp - damage)
             print(f"{attacker.name} was hurt by Rough Skin! (-{damage} HP)")
-        
         # Life Orb recoil
         if attacker.item and attacker.item.name == 'Life Orb' and move.category != 'Status':
             recoil = attacker.max_hp // 10
             attacker.hp = max(0, attacker.hp - recoil)
             print(f"{attacker.name} lost HP due to Life Orb! (-{recoil} HP)")
-        
+        # Move lock (Choice items)
+        if attacker.item and attacker.item.name in ['Choice Band', 'Choice Specs', 'Choice Scarf']:
+            if not hasattr(attacker, 'locked_move') or not attacker.locked_move:
+                attacker.locked_move = move.name
         # Animate health bar change
         time.sleep(0.5)
         self.print_animated_health_bar(defender)
@@ -1177,60 +1204,118 @@ class BattleSimulator:
         return pokemon
     
     def select_pokemon(self, is_player: bool = True) -> Pokemon:
-            """Let user search for and select a Pokémon by name (using PokéAPI)"""
-            player_type = "your" if is_player else "opponent"
-            while True:
-                name = input(f"\nEnter the name of {player_type} Pokémon: ").strip().lower()
-                try:
-                    pokemon = self.create_pokemon(name)
+        """Let user search for and select a Pokémon by name (using PokéAPI) with autocomplete and apply competitive moveset/EVs/IVs/item/nature/ability"""
+        player_type = "your" if is_player else "opponent"
+        # For autocomplete, fetch a list of Pokémon names from PokéAPI (first 1000 for speed)
+        try:
+            resp = requests.get(f"{API}/pokemon?limit=1500")
+            resp.raise_for_status()
+            poke_names = [p['name'] for p in resp.json().get('results', [])]
+        except Exception:
+            poke_names = []
+        poke_completer = WordCompleter(poke_names, ignore_case=True)
+        while True:
+            name = prompt(f"\nEnter the name of {player_type} Pokémon: ", completer=poke_completer).strip().lower()
+            try:
+                # Use return_moveset to get the best competitive set
+                moveset = return_moveset(name)
+                if not moveset:
+                    print("No competitive moveset found for this Pokémon. Using default PokéAPI data.")
+                    pokemon = self.create_pokemon(name, {})
                     print(f"Selected: {pokemon.name}")
-                    
-                    # Set EVs
-                    print("\nSet EVs (Effort Values) for your Pokémon (max 510 total, max 252 per stat):")
-                    evs = {"hp": 0, "attack": 0, "defense": 0, "sp_attack": 0, "sp_defense": 0, "speed": 0}
-                    total_evs = 0
-                    for stat in evs.keys():
-                        while True:
-                            try:
-                                value = int(input(f"Enter EVs for {stat} (current total: {total_evs}/510): "))
-                                if 0 <= value <= 252 and total_evs + value <= 510:
-                                    evs[stat] = value
-                                    total_evs += value
-                                    break
-                                else:
-                                    print("Invalid value. Ensure it's between 0 and 252, and total EVs do not exceed 510.")
-                            except ValueError:
-                                print("Please enter a valid number.")
-                    
-                    # Apply EVs to Pokémon stats
-                    for stat, value in evs.items():
-                        base_stat = getattr(pokemon, stat)
-                        ev_bonus = (value // 4)
-                        setattr(pokemon, stat, base_stat + ev_bonus)
-                    
-                    # Set item
-                    print("\nSelect an item for your Pokémon:")
-                    item_list = list(ITEMS.keys())
-                    for i, item_name in enumerate(item_list[:10]):  # Show first 10 items
-                        item = ITEMS[item_name]
-                        print(f"{i+1}. {item.name} - {item.description}")
-                    
-                    print("11. More items...")
-                    print("0. No item")
-                    
-                    choice = input("Enter choice (0-11): ")
-                    if choice.isdigit() and 1 <= int(choice) <= 10:
-                        pokemon.item = ITEMS[item_list[int(choice) - 1]]
-                        print(f"Item set to {pokemon.item.name}")
-                    elif choice == "0":
-                        pokemon.item = None
-                        print("No item equipped")
-                    
                     return pokemon
-                except requests.HTTPError:
-                    print("Pokémon not found on PokéAPI. Please try again.")
-                except Exception as e:
-                    print(f"Error: {str(e)}")
+                # Apply moveset fields
+                print(f"\n[DEBUG] Applying competitive moveset for {name.title()}:")
+                #print(json.dumps(moveset, indent=2))
+                # Moves
+                moves = moveset.get("moves", [])
+                # Nature
+                nature = moveset.get("nature", "Hardy")
+                # Ability
+                ability = moveset.get("ability")
+                # Item
+                item = moveset.get("item")
+                # EVs/IVs
+                evs = moveset.get("evs", {})
+                ivs = moveset.get("ivs", {})
+                # Create Pokémon with these fields
+                pokemon = self.create_pokemon(name, moveset=moveset, nature=nature, item_name=item)
+                # Set ability if present
+                if ability:
+                    # Try to match ability from POKEMON_DATABASE if possible
+                    db_abilities = POKEMON_DATABASE.get(pokemon.name, {}).get("abilities", [])
+                    for ab in db_abilities:
+                        if ab.name.lower() == ability.lower():
+                            pokemon.ability = ab
+                            break
+                    else:
+                        pokemon.ability = Ability(ability, "Competitive set ability", "")
+                # Set moves (overwrite with competitive set)
+                if moves:
+                    move_objs = []
+                    for move_name in moves:
+                        # Only process if move_name is a string and not a dict key
+                        if not isinstance(move_name, str):
+                            continue
+                        # Defensive: skip if move_name is a known non-move field
+                        if move_name.lower() in ["moves", "item", "nature", "ability", "evs", "ivs", "format", "set_name"]:
+                            continue
+                        try:
+                            move_data = fetch_move_data(move_name)
+                            move_objs.append(Move(
+                                name=move_data["name"].title().replace("-", " "),
+                                type=move_data["type"]["name"],
+                                category=move_data["damage_class"]["name"].title(),
+                                power=move_data["power"] or 0,
+                                accuracy=move_data["accuracy"] or 100,
+                                pp=move_data["pp"] or 10,
+                                max_pp=move_data["pp"] or 10,
+                                secondary_effects=[],
+                                priority=move_data["priority"] or 0,
+                                contact=False,
+                                description=next((e["short_effect"] for e in move_data["effect_entries"] if e["language"]["name"] == "en"), "")
+                            ))
+                        except Exception as e:
+                            print(f"[DEBUG] Could not fetch move {move_name}: {e}")
+                    if move_objs:
+                        pokemon.moves = move_objs
+                # Set EVs (Effort Values)
+                if evs:
+                    total_evs = 0
+                    for stat, value in evs.items():
+                        if stat in ["hp", "attack", "defense", "sp_attack", "sp_defense", "speed"]:
+                            base_stat = getattr(pokemon, stat)
+                            ev_bonus = (value // 4)
+                            setattr(pokemon, stat, base_stat + ev_bonus)
+                            total_evs += value
+                    print(f"[DEBUG] Applied EVs: {evs} (total: {total_evs})")
+                # Set IVs (Individual Values) - for debugging, just print, as stats are already maxed
+                if ivs:
+                    print(f"[DEBUG] IVs: {ivs}")
+                # Set item (already set in create_pokemon)
+                if item:
+                    print(f"[DEBUG] Item: {item}")
+                # Set nature
+                if nature:
+                    print(f"[DEBUG] Nature: {nature}")
+                # Set ability
+                if ability:
+                    print(f"[DEBUG] Ability: {ability}")
+                print(f"[DEBUG] Moves: {moves}")
+                print(f"Selected: {pokemon.name}")
+                # Ask if user wants to override
+                if is_player:
+                    override = prompt("Override with manual customization? (y/n): ").strip().lower()
+                    if override == "y":
+                        pokemon = self.customize_pokemon(pokemon)
+                # Reset move lock if present
+                if hasattr(pokemon, 'locked_move'):
+                    pokemon.locked_move = None
+                return pokemon
+            except requests.HTTPError:
+                print("Pokémon not found on PokéAPI. Please try again.")
+            except Exception as e:
+                print(f"Error: {str(e)}")
 
     
     def start_battle(self):

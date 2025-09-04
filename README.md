@@ -41,8 +41,7 @@ A command-line Pokémon battle simulator with competitive moveset integration, d
    pip install -r requirements.txt
    ```
 
-4. **Configure API keys**
-   - Edit `.env` with your PokéAPI and (optionally) Azure/Gemini keys.
+
 
 ## How to Run
 

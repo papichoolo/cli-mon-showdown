@@ -1,25 +1,29 @@
 # CLI Pokémon Showdown
 
-A command-line Pokémon battle simulator with competitive moveset integration, dynamic team building, and streamlined CLI experience.
+A command-line Pokémon battle simulator that integrates with Pokémon Showdown's simulator engine for accurate battle mechanics, team building, and competitive play.
 
 ## Features
 
-- **Competitive Movesets**: Automatically applies EVs, IVs, item, nature, and ability from Smogon sets (via `movesets.json`).
-- **Dynamic Pokémon Creation**: Fetches live stats, moves, and abilities from PokéAPI.
-- **Turn-Based Battle System**: Handles player/opponent turns, move execution, and effects.
-- **Accurate Damage Calculation**: Implements official Pokémon damage formula (STAB, type, crits, weather).
-- **Status & Secondary Effects**: Supports burn, poison, paralysis, and secondary move effects.
-- **Customizable Pokémon**: Users can override moveset, nature, item, etc.
-- **Streamlined CLI**: No redundant prompts; moveset info shown after selection.
+- **Pokémon Showdown Integration**: Uses the official Pokémon Showdown simulator for accurate battle mechanics
+- **Team Building**: Import and export teams in Showdown format
+- **Command-Line Interface**: Clean, streamlined CLI experience for battles
+- **Team Utilities**: JavaScript utilities for team parsing and validation using @pkmn libraries
+- **Automated Battles**: Support for automated battle scenarios and testing
 
 ## Project Structure
 
-- `cli.py` — Main CLI battle simulator (entry point)
-- `test.py` — Competitive moveset selection logic
-- `items.py` — Item database (Python)
-- `items.ts` — Item database (TypeScript)
-- `movesets.json` — Smogon competitive movesets
-- `.env` — API keys and environment variables
+- `cli_improved.py` — Enhanced CLI battle simulator (main entry point)
+- `cli.py` — Original CLI battle simulator
+- `showdown_wrapper.py` — Python wrapper for Pokémon Showdown simulator
+- `teamutils.js` — Team parsing and utilities using @pkmn libraries
+- `teams/` — Sample team files in Showdown format
+- `BATTLE_FIXES.md` — Documentation of battle system improvements
+
+## Prerequisites
+
+- **Python 3.7+**
+- **Node.js 14+**
+- **Pokémon Showdown** (cloned separately)
 
 ## Setup Instructions
 
@@ -29,45 +33,69 @@ A command-line Pokémon battle simulator with competitive moveset integration, d
    cd cli-mon-showdown
    ```
 
-2. **Create a virtual environment**
+2. **Install Python dependencies**
    ```powershell
    python -m venv .venv
    .venv\Scripts\activate
-   ```
-
-3. **Install dependencies**
-   *(If `requirements.txt` is missing, install manually: `prompt_toolkit`, `requests`, `python-dotenv`)*
-   ```powershell
    pip install -r requirements.txt
    ```
 
+3. **Install Node.js dependencies**
+   ```powershell
+   npm install
+   ```
 
+4. **Clone Pokémon Showdown**
+   ```powershell
+   git clone https://github.com/smogon/pokemon-showdown.git
+   cd pokemon-showdown
+   npm install
+   cd ..
+   ```
 
 ## How to Run
 
+### Basic Battle Simulation
 ```powershell
-python cli.py
+python cli_improved.py teams/p1.txt teams/p2.txt
 ```
 
-## Example Usage
-
-```
-🌟 Welcome to Pokemon Battle Simulator! 🌟
-==================================================
-Enter the name of your Pokémon: Charizard
-Selected: Charizard
-Enter the name of opponent Pokémon: Blastoise
-Selected: Blastoise
-
-🔥 BATTLE START! 🔥
-Charizard vs Blastoise
-...
+### Team Utilities
+```powershell
+node teamutils.js teams/p1.txt
 ```
 
-## Notes
-- Moveset details are shown in the CLI after selection.
-- Supports both static and dynamic Pokémon/item databases.
-- For advanced usage, see code comments in `cli.py` and `test.py`.
+## Team Format
+
+Teams should be in Pokémon Showdown's importable format. Example:
+
+```
+Charizard @ Life Orb
+Ability: Solar Power
+EVs: 252 SpA / 4 SpD / 252 Spe
+Timid Nature
+- Solar Beam
+- Fire Blast
+- Air Slash
+- Hidden Power Ice
+```
+
+## Dependencies
+
+### Python
+- Core Python libraries for CLI and battle logic
+
+### Node.js
+- `@pkmn/dex` - Pokémon data and utilities
+- `@pkmn/sets` - Team parsing and validation
+- `@pkmn/sim` - Simulator integration
+
+## Important Notes
+
+- **Pokémon Showdown folder is NOT included** in this repository. Clone it separately as shown in setup instructions.
+- Team files in `teams/` directory are examples - create your own or use Showdown's team builder.
+- The simulator requires the Pokémon Showdown engine to be properly installed and accessible.
 
 ---
-Created by papichoolo. Competitive sets courtesy of Smogon University.
+
+Created by papichoolo. Uses Pokémon Showdown's simulator engine and @pkmn libraries.

@@ -1,0 +1,6 @@
+Alakazam||FocusSash|Synchronize|ThunderWave,Psychic,Substitute,Recover|Timid|,,4,252,,252|||||
+Garchomp||LifeOrb|RoughSkin|Earthquake,Outrage,FireBlast,StealthRock|Jolly|,252,4,,,252|||||
+Talonflame||SharpBeak|GaleWings|BraveBird,FlareBlitz,SwordsDance,Roost|Adamant|,252,4,,,252|||||
+Rotom-Wash||ChoiceSpecs|Levitate|HydroPump,VoltSwitch,WillOWisp,Trick|Modest|248,,,28,,232|||||
+Scizor||Scizorite|Technician|BulletPunch,Uturn,Roost,Defog|Impish|248,44,,,216,|||||
+Keldeo||ChoiceSpecs|Justified|Surf,SecretSword,HydroPump,IcyWind|Timid|,,4,252,,252|||||

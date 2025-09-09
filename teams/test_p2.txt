@@ -1,0 +1,6 @@
+Charizard||Leftovers|Blaze|Flamethrower,SolarBeam,FocusBlast,Roost|Modest|,,4,252,,252|||||
+Tyranitar||Leftovers|SandStream|StoneEdge,Crunch,Earthquake,Stealth Rock|Adamant|,252,4,,,252|||||
+Garchomp||LifeOrb|RoughSkin|Earthquake,Outrage,FireBlast,StealthRock|Jolly|,252,4,,,252|||||
+Ferrothorn||Leftovers|IronBarbs|StealthRock,LeechSeed,GyroBall,PowerWhip|Relaxed|252,,88,,168,||,,,,,0|||
+Latios||ChoiceSpecs|Levitate|DracoMeteor,Psyshock,HiddenPowerFire,Trick|Timid|,,4,252,,252||,30,,30,,30|||
+Excadrill||FocusSash|MoldBreaker|Earthquake,IronHead,RapidSpin,StealthRock|Jolly|,252,,,4,252|||||

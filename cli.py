@@ -1,1357 +1,706 @@
-import random
-import time
-import sys
+import argparse
 import json
-import requests
-from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple, Any
-from enum import Enum
-from copy import deepcopy
-from test import return_moveset
-# Autocomplete support
-from prompt_toolkit import prompt
-from prompt_toolkit.completion import WordCompleter
+import subprocess
+import random
+from typing import Dict, Optional, Tuple
+from showdown_wrapper import ShowdownWrapper
 
-# Enums for better type safety
-API = "https://pokeapi.co/api/v2"
-class StatusCondition(Enum):
-    NONE = "none"
-    BURN = "burn"
-    FREEZE = "freeze"
-    PARALYSIS = "paralysis"
-    POISON = "poison"
-    BADLY_POISON = "badly_poison"
-    SLEEP = "sleep"
+# Debug flag - set to True to enable detailed debugging
+DEBUG = False
 
-class Weather(Enum):
-    CLEAR = "clear"
-    RAIN = "rain"
-    HARSH_SUNLIGHT = "harsh_sunlight"
-    SANDSTORM = "sandstorm"
-    HAIL = "hail"
-    SNOW = "snow"
+def debug_print(msg: str, prefix: str = "DEBUG"):
+    """Print debug messages if debugging is enabled"""
+    if DEBUG:
+        print(f"[{prefix}] {msg}")
 
-class VolatileStatus(Enum):
-    CONFUSED = "confused"
-    FLINCH = "flinch"
-    TRAPPED = "trapped"
-    CURSED = "cursed"
-    LEECH_SEED = "leech_seed"
-    ATTRACT = "attract"
-    TAUNT = "taunt"
+# ---- Lightweight 1v1 battle state for reactive UI ----
+BattleSide = Dict[str, Optional[object]]  # name, hp, maxhp, status, fainted
 
-# Type effectiveness chart
-TYPE_EFFECTIVENESS = {
-    'Normal': {'Rock': 0.5, 'Ghost': 0, 'Steel': 0.5},
-    'Fire': {'Fire': 0.5, 'Water': 0.5, 'Grass': 2, 'Ice': 2, 'Bug': 2, 'Rock': 0.5, 'Dragon': 0.5, 'Steel': 2},
-    'Water': {'Fire': 2, 'Water': 0.5, 'Grass': 0.5, 'Ground': 2, 'Rock': 2, 'Dragon': 0.5},
-    'Electric': {'Water': 2, 'Electric': 0.5, 'Grass': 0.5, 'Ground': 0, 'Flying': 2, 'Dragon': 0.5},
-    'Grass': {'Fire': 0.5, 'Water': 2, 'Grass': 0.5, 'Poison': 0.5, 'Ground': 2, 'Flying': 0.5, 'Bug': 0.5, 'Rock': 2, 'Dragon': 0.5, 'Steel': 0.5},
-    'Ice': {'Fire': 0.5, 'Water': 0.5, 'Grass': 2, 'Ice': 0.5, 'Ground': 2, 'Flying': 2, 'Dragon': 2, 'Steel': 0.5},
-    'Fighting': {'Normal': 2, 'Ice': 2, 'Poison': 0.5, 'Flying': 0.5, 'Psychic': 0.5, 'Bug': 0.5, 'Rock': 2, 'Ghost': 0, 'Dark': 2, 'Steel': 2, 'Fairy': 0.5},
-    'Poison': {'Grass': 2, 'Poison': 0.5, 'Ground': 0.5, 'Rock': 0.5, 'Ghost': 0.5, 'Steel': 0, 'Fairy': 2},
-    'Ground': {'Fire': 2, 'Electric': 2, 'Grass': 0.5, 'Poison': 2, 'Flying': 0, 'Bug': 0.5, 'Rock': 2, 'Steel': 2},
-    'Flying': {'Electric': 0.5, 'Grass': 2, 'Ice': 0.5, 'Fighting': 2, 'Bug': 2, 'Rock': 0.5, 'Steel': 0.5},
-    'Psychic': {'Fighting': 2, 'Poison': 2, 'Psychic': 0.5, 'Dark': 0, 'Steel': 0.5},
-    'Bug': {'Fire': 0.5, 'Grass': 2, 'Fighting': 0.5, 'Poison': 0.5, 'Flying': 0.5, 'Psychic': 2, 'Ghost': 0.5, 'Dark': 2, 'Steel': 0.5, 'Fairy': 0.5},
-    'Rock': {'Fire': 2, 'Ice': 2, 'Fighting': 0.5, 'Ground': 0.5, 'Flying': 2, 'Bug': 2, 'Steel': 0.5},
-    'Ghost': {'Normal': 0, 'Psychic': 2, 'Ghost': 2, 'Dark': 0.5},
-    'Dragon': {'Dragon': 2, 'Steel': 0.5, 'Fairy': 0},
-    'Dark': {'Fighting': 0.5, 'Psychic': 2, 'Bug': 0.5, 'Ghost': 2, 'Dark': 0.5, 'Fairy': 0.5},
-    'Steel': {'Fire': 0.5, 'Water': 0.5, 'Electric': 0.5, 'Ice': 2, 'Rock': 2, 'Steel': 0.5, 'Fairy': 2},
-    'Fairy': {'Fire': 0.5, 'Fighting': 2, 'Poison': 0.5, 'Dragon': 2, 'Dark': 2, 'Steel': 0.5}
-}
-
-# Pokemon Natures
-NATURES = {
-    'Hardy': {'increased': None, 'decreased': None},
-    'Lonely': {'increased': 'attack', 'decreased': 'defense'},
-    'Brave': {'increased': 'attack', 'decreased': 'speed'},
-    'Adamant': {'increased': 'attack', 'decreased': 'sp_attack'},
-    'Naughty': {'increased': 'attack', 'decreased': 'sp_defense'},
-    'Bold': {'increased': 'defense', 'decreased': 'attack'},
-    'Docile': {'increased': None, 'decreased': None},
-    'Relaxed': {'increased': 'defense', 'decreased': 'speed'},
-    'Impish': {'increased': 'defense', 'decreased': 'sp_attack'},
-    'Lax': {'increased': 'defense', 'decreased': 'sp_defense'},
-    'Timid': {'increased': 'speed', 'decreased': 'attack'},
-    'Hasty': {'increased': 'speed', 'decreased': 'defense'},
-    'Serious': {'increased': None, 'decreased': None},
-    'Jolly': {'increased': 'speed', 'decreased': 'sp_attack'},
-    'Naive': {'increased': 'speed', 'decreased': 'sp_defense'},
-    'Modest': {'increased': 'sp_attack', 'decreased': 'attack'},
-    'Mild': {'increased': 'sp_attack', 'decreased': 'defense'},
-    'Quiet': {'increased': 'sp_attack', 'decreased': 'speed'},
-    'Bashful': {'increased': None, 'decreased': None},
-    'Rash': {'increased': 'sp_attack', 'decreased': 'sp_defense'},
-    'Calm': {'increased': 'sp_defense', 'decreased': 'attack'},
-    'Gentle': {'increased': 'sp_defense', 'decreased': 'defense'},
-    'Sassy': {'increased': 'sp_defense', 'decreased': 'speed'},
-    'Careful': {'increased': 'sp_defense', 'decreased': 'sp_attack'},
-    'Quirky': {'increased': None, 'decreased': None},
-}
-
-@dataclass
-class SecondaryEffect:
-    """Represents a secondary effect of a move"""
-    chance: int  # Percentage chance
-    effect_type: str  # 'status', 'stat_change', 'flinch', etc.
-    target: str  # 'self', 'opponent', 'both'
-    value: Any  # The effect value (status condition, stat changes, etc.)
-
-@dataclass
-class Move:
-    name: str
-    type: str
-    category: str  # 'Physical', 'Special', 'Status'
-    power: int
-    accuracy: int
-    pp: int
-    max_pp: int
-    secondary_effects: List[SecondaryEffect] = field(default_factory=list)
-    priority: int = 0  # Move priority (-6 to +5)
-    contact: bool = False  # Whether the move makes contact
-    description: str = ""
-    
-    def __post_init__(self):
-        self.max_pp = self.pp
-
-@dataclass
-class Ability:
-    name: str
-    description: str
-    effect_type: str  # 'passive', 'on_switch', 'on_attack', etc.
-
-@dataclass
-class Item:
-    name: str
-    description: str
-    effect_type: str  # 'stat_boost', 'status_immunity', 'berry', etc.
-    value: Any = None
-
-@dataclass
-class StatChanges:
-    """Tracks stat stage changes (-6 to +6)"""
-    attack: int = 0
-    defense: int = 0
-    sp_attack: int = 0
-    sp_defense: int = 0
-    speed: int = 0
-    accuracy: int = 0
-    evasion: int = 0
-    
-    def get_multiplier(self, stat: str) -> float:
-        """Get the multiplier for a stat based on its stage"""
-        stage = getattr(self, stat, 0)
-        if stage >= 0:
-            return (2 + stage) / 2
-        else:
-            return 2 / (2 - stage)
-
-@dataclass
-class Pokemon:
-    name: str
-    types: List[str]
-    level: int
-    hp: int
-    max_hp: int
-    attack: int
-    defense: int
-    sp_attack: int
-    sp_defense: int
-    speed: int
-    moves: List[Move]
-    ability: Optional[Ability] = None
-    item: Optional[Item] = None
-    nature: str = "Hardy"
-    status: StatusCondition = StatusCondition.NONE
-    volatile_status: List[VolatileStatus] = field(default_factory=list)
-    stat_changes: StatChanges = field(default_factory=StatChanges)
-    sleep_turns: int = 0
-    confusion_turns: int = 0
-    
-    def __post_init__(self):
-        self.max_hp = self.hp
-        self.apply_nature()
-    
-    def apply_nature(self):
-        """Apply nature stat modifications"""
-        nature_data = NATURES.get(self.nature, NATURES['Hardy'])
-        increased = nature_data['increased']
-        decreased = nature_data['decreased']
-        
-        if increased:
-            original_stat = getattr(self, increased)
-            setattr(self, increased, int(original_stat * 1.1))
-        
-        if decreased:
-            original_stat = getattr(self, decreased)
-            setattr(self, decreased, int(original_stat * 0.9))
-    
-    def get_effective_stat(self, stat: str) -> int:
-        """Get stat with all modifiers applied"""
-        base_stat = getattr(self, stat)
-        multiplier = self.stat_changes.get_multiplier(stat)
-        
-        # Apply status conditions
-        if stat == 'attack' and self.status == StatusCondition.BURN:
-            multiplier *= 0.5
-        elif stat == 'speed' and self.status == StatusCondition.PARALYSIS:
-            multiplier *= 0.5
-        
-        return int(base_stat * multiplier)
-
-@dataclass
-class BattleField:
-    """Represents the battlefield state"""
-    weather: Weather = Weather.CLEAR
-    weather_turns: int = 0
-    hazards: Dict[str, List[str]] = field(default_factory=dict)  # 'player'/'opponent' -> list of hazards
-    terrain: Optional[str] = None
-    terrain_turns: int = 0
-
-def fetch_pokemon_data(name: str) -> dict:
-    resp = requests.get(f"{API}/pokemon/{name.lower()}")
-    resp.raise_for_status()
-    return resp.json()
-def fetch_pokemon_base_stats(name: str) -> dict:
-    resp = requests.get(f"{API}/pokemon/{name.lower()}")
-    resp.raise_for_status()
-    data = resp.json()
-    return {stat['stat']['name']: stat['base_stat'] for stat in data['stats']}
-
-def fetch_nature_data(nature: str) -> dict:
-    resp = requests.get(f"{API}/nature/{nature.lower()}")
-    resp.raise_for_status()
-    return resp.json()
-
-def get_random_nature() -> str:
-    resp = requests.get(f"{API}/nature")
-    resp.raise_for_status()
-    results = resp.json().get("results", [])
-    return random.choice(results)["name"]
-
-def fetch_move_data(name: str) -> dict:
-    resp = requests.get(f"{API}/move/{name.lower().replace(' ', '-').replace("'", '')}")
-    resp.raise_for_status()
-    return resp.json()
-
-
-# Enhanced Pokemon Database
-POKEMON_DATABASE = {
-    'Charizard': {
-        'types': ['Fire', 'Flying'],
-        'base_stats': {'hp': 78, 'attack': 84, 'defense': 78, 'sp_attack': 109, 'sp_defense': 85, 'speed': 100},
-        'abilities': [
-            Ability('Blaze', 'Powers up Fire-type moves when HP is low', 'conditional'),
-            Ability('Solar Power', 'Boosts Sp. Atk in harsh sunlight but loses HP', 'weather')
-        ],
-        'level_up_moves': [
-            Move('Scratch', 'Normal', 'Physical', 40, 100, 35, 35, [], 0, True),
-            Move('Ember', 'Fire', 'Special', 40, 100, 25, 25, 
-                 [SecondaryEffect(10, 'status', 'opponent', StatusCondition.BURN)]),
-            Move('Flamethrower', 'Fire', 'Special', 90, 100, 15, 15,
-                 [SecondaryEffect(10, 'status', 'opponent', StatusCondition.BURN)]),
-            Move('Fire Blast', 'Fire', 'Special', 110, 85, 5, 5,
-                 [SecondaryEffect(10, 'status', 'opponent', StatusCondition.BURN)]),
-            Move('Air Slash', 'Flying', 'Special', 75, 95, 15, 15,
-                 [SecondaryEffect(30, 'flinch', 'opponent', True)]),
-            Move('Dragon Pulse', 'Dragon', 'Special', 85, 100, 10, 10),
-            Move('Solar Beam', 'Grass', 'Special', 120, 100, 10, 10),
-            Move('Thunder Punch', 'Electric', 'Physical', 75, 100, 15, 15,
-                 [SecondaryEffect(10, 'status', 'opponent', StatusCondition.PARALYSIS)], 0, True),
-            Move('Roost', 'Flying', 'Status', 0, 100, 5, 5),
-            Move('Sunny Day', 'Fire', 'Status', 0, 100, 5, 5),
-        ]
-    },
-    'Blastoise': {
-        'types': ['Water'],
-        'base_stats': {'hp': 79, 'attack': 83, 'defense': 100, 'sp_attack': 85, 'sp_defense': 105, 'speed': 78},
-        'abilities': [
-            Ability('Torrent', 'Powers up Water-type moves when HP is low', 'conditional'),
-            Ability('Rain Dish', 'Restores HP in rain', 'weather')
-        ],
-        'level_up_moves': [
-            Move('Tackle', 'Normal', 'Physical', 40, 100, 35, 35, [], 0, True),
-            Move('Water Gun', 'Water', 'Special', 40, 100, 25, 25),
-            Move('Hydro Pump', 'Water', 'Special', 110, 80, 5, 5),
-            Move('Surf', 'Water', 'Special', 90, 100, 15, 15),
-            Move('Ice Beam', 'Ice', 'Special', 90, 100, 10, 10,
-                 [SecondaryEffect(10, 'status', 'opponent', StatusCondition.FREEZE)]),
-            Move('Blizzard', 'Ice', 'Special', 110, 70, 5, 5,
-                 [SecondaryEffect(10, 'status', 'opponent', StatusCondition.FREEZE)]),
-            Move('Earthquake', 'Ground', 'Physical', 100, 100, 10, 10),
-            Move('Flash Cannon', 'Steel', 'Special', 80, 100, 10, 10,
-                 [SecondaryEffect(10, 'stat_change', 'opponent', {'sp_defense': -1})]),
-            Move('Rain Dance', 'Water', 'Status', 0, 100, 5, 5),
-            Move('Withdraw', 'Water', 'Status', 0, 100, 40, 40),
-        ]
-    },
-    'Venusaur': {
-        'types': ['Grass', 'Poison'],
-        'base_stats': {'hp': 80, 'attack': 82, 'defense': 83, 'sp_attack': 100, 'sp_defense': 100, 'speed': 80},
-        'abilities': [
-            Ability('Overgrow', 'Powers up Grass-type moves when HP is low', 'conditional'),
-            Ability('Chlorophyll', 'Boosts Speed in harsh sunlight', 'weather')
-        ],
-        'level_up_moves': [
-            Move('Tackle', 'Normal', 'Physical', 40, 100, 35, 35, [], 0, True),
-            Move('Vine Whip', 'Grass', 'Physical', 45, 100, 25, 25, [], 0, True),
-            Move('Giga Drain', 'Grass', 'Special', 75, 100, 10, 10),
-            Move('Solar Beam', 'Grass', 'Special', 120, 100, 10, 10),
-            Move('Sludge Bomb', 'Poison', 'Special', 90, 100, 10, 10,
-                 [SecondaryEffect(30, 'status', 'opponent', StatusCondition.POISON)]),
-            Move('Earth Power', 'Ground', 'Special', 90, 100, 10, 10,
-                 [SecondaryEffect(10, 'stat_change', 'opponent', {'sp_defense': -1})]),
-            Move('Sleep Powder', 'Grass', 'Status', 0, 75, 15, 15),
-            Move('Toxic', 'Poison', 'Status', 0, 90, 10, 10),
-            Move('Leech Seed', 'Grass', 'Status', 0, 90, 10, 10),
-            Move('Synthesis', 'Grass', 'Status', 0, 100, 5, 5),
-        ]
-    },
-    'Pikachu': {
-        'types': ['Electric'],
-        'base_stats': {'hp': 35, 'attack': 55, 'defense': 40, 'sp_attack': 50, 'sp_defense': 50, 'speed': 90},
-        'abilities': [
-            Ability('Static', 'May cause paralysis when contacted', 'contact'),
-            Ability('Lightning Rod', 'Draws Electric moves and boosts Sp. Atk', 'redirect')
-        ],
-        'level_up_moves': [
-            Move('Quick Attack', 'Normal', 'Physical', 40, 100, 30, 30, [], 1, True),
-            Move('Thunder Shock', 'Electric', 'Special', 40, 100, 30, 30,
-                 [SecondaryEffect(10, 'status', 'opponent', StatusCondition.PARALYSIS)]),
-            Move('Thunderbolt', 'Electric', 'Special', 90, 100, 15, 15,
-                 [SecondaryEffect(10, 'status', 'opponent', StatusCondition.PARALYSIS)]),
-            Move('Thunder', 'Electric', 'Special', 110, 70, 10, 10,
-                 [SecondaryEffect(30, 'status', 'opponent', StatusCondition.PARALYSIS)]),
-            Move('Iron Tail', 'Steel', 'Physical', 100, 75, 15, 15,
-                 [SecondaryEffect(30, 'stat_change', 'opponent', {'defense': -1})], 0, True),
-            Move('Grass Knot', 'Grass', 'Special', 60, 100, 20, 20),
-            Move('Double Team', 'Normal', 'Status', 0, 100, 15, 15),
-            Move('Agility', 'Normal', 'Status', 0, 100, 30, 30),
-            Move('Thunder Wave', 'Electric', 'Status', 0, 90, 20, 20),
-            Move('Light Screen', 'Psychic', 'Status', 0, 100, 30, 30),
-        ]
-    },
-    'Garchomp': {
-        'types': ['Dragon', 'Ground'],
-        'base_stats': {'hp': 108, 'attack': 130, 'defense': 95, 'sp_attack': 80, 'sp_defense': 85, 'speed': 102},
-        'abilities': [
-            Ability('Sand Veil', 'Boosts evasion in a sandstorm', 'weather'),
-            Ability('Rough Skin', 'Inflicts damage on contact', 'contact')
-        ],
-        'level_up_moves': [
-            Move('Tackle', 'Normal', 'Physical', 40, 100, 35, 35, [], 0, True),
-            Move('Sand Attack', 'Ground', 'Status', 0, 100, 15, 15),
-            Move('Dragon Claw', 'Dragon', 'Physical', 80, 100, 15, 15, [], 0, True),
-            Move('Earthquake', 'Ground', 'Physical', 100, 100, 10, 10),
-            Move('Stone Edge', 'Rock', 'Physical', 100, 80, 5, 5),
-            Move('Outrage', 'Dragon', 'Physical', 120, 100, 10, 10),
-            Move('Fire Blast', 'Fire', 'Special', 110, 85, 5, 5,
-                 [SecondaryEffect(10, 'status', 'opponent', StatusCondition.BURN)]),
-            Move('Sandstorm', 'Rock', 'Status', 0, 100, 10, 10),
-            Move('Swords Dance', 'Normal', 'Status', 0, 100, 20, 20),
-            Move('Stealth Rock', 'Rock', 'Status', 0, 100, 20, 20),
-        ]
-    },
-    'Alakazam': {
-        'types': ['Psychic'],
-        'base_stats': {'hp': 55, 'attack': 50, 'defense': 45, 'sp_attack': 135, 'sp_defense': 95, 'speed': 120},
-        'abilities': [
-            Ability('Synchronize', 'Passes on status conditions', 'status'),
-            Ability('Inner Focus', 'Prevents flinching', 'flinch_immunity')
-        ],
-        'level_up_moves': [
-            Move('Teleport', 'Psychic', 'Status', 0, 100, 20, 20, [], -6),
-            Move('Confusion', 'Psychic', 'Special', 50, 100, 25, 25,
-                 [SecondaryEffect(10, 'volatile_status', 'opponent', VolatileStatus.CONFUSED)]),
-            Move('Psychic', 'Psychic', 'Special', 90, 100, 10, 10,
-                 [SecondaryEffect(10, 'stat_change', 'opponent', {'sp_defense': -1})]),
-            Move('Psyshock', 'Psychic', 'Special', 80, 100, 10, 10),
-            Move('Focus Blast', 'Fighting', 'Special', 120, 70, 5, 5,
-                 [SecondaryEffect(10, 'stat_change', 'opponent', {'sp_defense': -1})]),
-            Move('Shadow Ball', 'Ghost', 'Special', 80, 100, 15, 15,
-                 [SecondaryEffect(20, 'stat_change', 'opponent', {'sp_defense': -1})]),
-            Move('Dazzling Gleam', 'Fairy', 'Special', 80, 100, 10, 10),
-            Move('Calm Mind', 'Psychic', 'Status', 0, 100, 20, 20),
-            Move('Recover', 'Normal', 'Status', 0, 100, 5, 5),
-            Move('Reflect', 'Psychic', 'Status', 0, 100, 20, 20),
-        ]
+def _new_battle_state() -> Dict[str, BattleSide]:
+    return {
+        'p1': {'name': None, 'hp': None, 'maxhp': None, 'hp_pct': None, 'status': None, 'fainted': False},
+        'p2': {'name': None, 'hp': None, 'maxhp': None, 'hp_pct': None, 'status': None, 'fainted': False},
     }
-}
 
-# Items database
-ITEMS = {
-    'Leftovers': Item('Leftovers', 'Restores HP every turn', 'healing', 1/16),
-    'Choice Band': Item('Choice Band', 'Boosts Attack but locks into one move', 'stat_boost', {'attack': 1.5}),
-    'Choice Specs': Item('Choice Specs', 'Boosts Sp. Atk but locks into one move', 'stat_boost', {'sp_attack': 1.5}),
-    'Choice Scarf': Item('Choice Scarf', 'Boosts Speed but locks into one move', 'stat_boost', {'speed': 1.5}),
-    'Focus Sash': Item('Focus Sash', 'Survives a KO hit with 1 HP when at full HP', 'survival', None),
-    'Life Orb': Item('Life Orb', 'Boosts attack power but causes recoil', 'power_boost', 1.3),
-    'Flame Orb': Item('Flame Orb', 'Burns the holder after one turn', 'status_orb', StatusCondition.BURN),
-    'Toxic Orb': Item('Toxic Orb', 'Badly poisons the holder after one turn', 'status_orb', StatusCondition.BADLY_POISON),
-    'Sitrus Berry': Item('Sitrus Berry', 'Restores HP when below 50%', 'berry', 0.25),
-    'Lum Berry': Item('Lum Berry', 'Cures any status condition', 'status_cure', None),
-}
+def _parse_actor(token: str) -> Tuple[Optional[str], Optional[str]]:
+    # token like 'p1a: Charizard'
+    if ': ' in token:
+        side_part, name = token.split(': ', 1)
+        side = side_part[:2] if side_part.startswith(('p1', 'p2')) else None
+        return side, name
+    return None, None
 
-class BattleSimulator:
-    def __init__(self):
-        self.player_pokemon = None
-        self.opponent_pokemon = None
-        self.battlefield = BattleField()
-        self.turn_count = 0
-        
-    def calculate_stats_at_level(self, base_stats: Dict[str, int], level: int = 100) -> Dict[str, int]:
-        """Calculate stats at a given level using the standard formula"""
-        calculated = {}
-        for stat, base in base_stats.items():
-            if stat == 'hp':
-                calculated[stat] = int(((2 * base + 31) * level) / 100) + level + 10
-            else:
-                calculated[stat] = int(((2 * base + 31) * level) / 100) + 5
-        return calculated
-    
-    def create_pokemon(self, name: str, moveset, level: int = 100, nature: Optional[str] = None,
-                   ability_index: int = 0, item_name: Optional[str] = None) -> Pokemon:
-        """Create a Pokemon instance using live data from PokéAPI"""
-        import math
-        selected_moves = moveset
-        data = fetch_pokemon_data(name)
-        stats_raw = {s["stat"]["name"]: s["base_stat"] for s in data["stats"]}
-        #selected_moves = return_moveset(data["name"].lower())
-        #print(f"Selected moves for {name}: {selected_moves}")
-        types = [t["type"]["name"] for t in data["types"]]
-        moves_available = [m["move"]["name"] for m in data["moves"]]
-        #selected_moves = random.sample(moves_available, k=min(4, len(moves_available)))
-        nature = nature or get_random_nature()
-        nat_data = fetch_nature_data(nature)
-        inc = nat_data["increased_stat"]["name"] if nat_data["increased_stat"] else None
-        dec = nat_data["decreased_stat"]["name"] if nat_data["decreased_stat"] else None
-
-        def apply_nature(stat: str, base: int) -> int:
-            if stat == inc:
-                return math.floor(base * 1.1)
-            elif stat == dec:
-                return math.floor(base * 0.9)
-            return base
-
-        base_hp = ((2 * stats_raw["hp"] * level) // 100) + level + 10
-        stats = {
-            "hp": base_hp,
-            "attack": apply_nature("attack", ((2 * stats_raw["attack"] * level) // 100) + 5),
-            "defense": apply_nature("defense", ((2 * stats_raw["defense"] * level) // 100) + 5),
-            "sp_attack": apply_nature("sp_attack", ((2 * stats_raw["special-attack"] * level) // 100) + 5),
-            "sp_defense": apply_nature("sp_defense", ((2 * stats_raw["special-defense"] * level) // 100) + 5),
-            "speed": apply_nature("speed", ((2 * stats_raw["speed"] * level) // 100) + 5)
-        }
-        # Cap HP at max_hp after stat calculation
-        stats["hp"] = min(stats["hp"], base_hp)
-
-        item = ITEMS.get(item_name) if item_name else None
-
-        move_objs = []
-        #print(f"Fetching move data for: {selected_moves}")
-        for move_name in selected_moves['moves']:
-            try:
-                move_data = fetch_move_data(move_name)
-                #print(move_data)
-                move_objs.append(Move(
-                    name=move_data["name"].title().replace("-", " "),
-                    type=move_data["type"]["name"],
-                    category=move_data["damage_class"]["name"].title(),
-                    power=move_data["power"] or 0,
-                    accuracy=move_data["accuracy"] or 100,
-                    pp=move_data["pp"] or 10,
-                    max_pp=move_data["pp"] or 10,
-                    secondary_effects=[],
-                    priority=move_data["priority"] or 0,
-                    contact=False,  # Simplified
-                    description=next((e["short_effect"] for e in move_data["effect_entries"] if e["language"]["name"] == "en"), "")
-                ))
-            except Exception as e:
-                print(f"Could not fetch move {move_name}: {e}")
-                continue
-
-        return Pokemon(
-            name=name.title(),
-            types=types,
-            level=level,
-            hp=stats["hp"],
-            max_hp=stats["hp"],
-            attack=stats["attack"],
-            defense=stats["defense"],
-            sp_attack=stats["sp_attack"],
-            sp_defense=stats["sp_defense"],
-            speed=stats["speed"],
-            moves=move_objs,
-            #ability=Ability(name="Unknown"),
-            item=item,
-            nature=nature.title()
-        )
-    
-    def print_animated_health_bar(self, pokemon: Pokemon, width: int = 25):
-        """Print an animated health bar with status indicators"""
-        hp_percentage = pokemon.hp / pokemon.max_hp
-        filled_width = int(hp_percentage * width)
-        empty_width = width - filled_width
-        
-        # Color coding based on HP percentage
-        if hp_percentage > 0.5:
-            color = '\033[92m'  # Green
-        elif hp_percentage > 0.2:
-            color = '\033[93m'  # Yellow
-        else:
-            color = '\033[91m'  # Red
-        
-        bar = color + '█' * filled_width + '\033[0m' + '░' * empty_width
-        
-        # Status indicators
-        status_text = ""
-        if pokemon.status != StatusCondition.NONE:
-            status_colors = {
-                StatusCondition.BURN: '\033[91m',
-                StatusCondition.FREEZE: '\033[96m',
-                StatusCondition.PARALYSIS: '\033[93m',
-                StatusCondition.POISON: '\033[95m',
-                StatusCondition.BADLY_POISON: '\033[95m',
-                StatusCondition.SLEEP: '\033[94m',
-            }
-            status_text = f" {status_colors[pokemon.status]}{pokemon.status.value.upper()}\033[0m"
-        
-        # Item indicator
-        item_text = f" @{pokemon.item.name}" if pokemon.item else ""
-        
-        print(f"{pokemon.name}{item_text}: [{bar}] {pokemon.hp}/{pokemon.max_hp} HP{status_text}")
-    
-    def apply_weather_effects(self, pokemon: Pokemon):
-        """Apply weather effects at end of turn"""
-        if self.battlefield.weather == Weather.SANDSTORM:
-            if not any(t in ['Rock', 'Ground', 'Steel'] for t in pokemon.types):
-                damage = pokemon.max_hp // 16
-                pokemon.hp = max(0, pokemon.hp - damage)
-                print(f"{pokemon.name} is buffeted by the sandstorm! (-{damage} HP)")
-        
-        elif self.battlefield.weather == Weather.HAIL:
-            if 'Ice' not in pokemon.types:
-                damage = pokemon.max_hp // 16
-                pokemon.hp = max(0, pokemon.hp - damage)
-                print(f"{pokemon.name} is buffeted by the hail! (-{damage} HP)")
-        
-        elif self.battlefield.weather == Weather.RAIN:
-            if pokemon.ability.name == 'Rain Dish':
-                heal = pokemon.max_hp // 16
-                pokemon.hp = min(pokemon.max_hp, pokemon.hp + heal)
-                print(f"{pokemon.name} restored HP with Rain Dish! (+{heal} HP)")
-    
-    def apply_status_effects(self, pokemon: Pokemon):
-        """Apply status condition effects"""
-        if pokemon.status == StatusCondition.BURN:
-            damage = pokemon.max_hp // 16
-            pokemon.hp = max(0, pokemon.hp - damage)
-            print(f"{pokemon.name} is hurt by its burn! (-{damage} HP)")
-        
-        elif pokemon.status == StatusCondition.POISON:
-            damage = pokemon.max_hp // 8
-            pokemon.hp = max(0, pokemon.hp - damage)
-            print(f"{pokemon.name} is hurt by poison! (-{damage} HP)")
-        
-        elif pokemon.status == StatusCondition.BADLY_POISON:
-            damage = pokemon.max_hp // 16 * pokemon.sleep_turns  # Use sleep_turns as poison counter
-            pokemon.hp = max(0, pokemon.hp - damage)
-            print(f"{pokemon.name} is hurt by bad poison! (-{damage} HP)")
-            pokemon.sleep_turns += 1
-    
-    def apply_item_effects(self, pokemon: Pokemon):
-        """Apply item effects"""
-        if not pokemon.item:
-            return
-        
-        if pokemon.item.name == 'Leftovers':
-            heal = int(pokemon.max_hp * pokemon.item.value)
-            if pokemon.hp < pokemon.max_hp:
-                pokemon.hp = min(pokemon.max_hp, pokemon.hp + heal)
-                print(f"{pokemon.name} restored HP with Leftovers! (+{heal} HP)")
-        
-        elif pokemon.item.name == 'Sitrus Berry' and pokemon.hp <= pokemon.max_hp // 2:
-            heal = int(pokemon.max_hp * pokemon.item.value)
-            pokemon.hp = min(pokemon.max_hp, pokemon.hp + heal)
-            print(f"{pokemon.name} restored HP with Sitrus Berry! (+{heal} HP)")
-            pokemon.item = None  # Berry is consumed
-        
-        elif pokemon.item.name == 'Lum Berry' and pokemon.status != StatusCondition.NONE:
-            pokemon.status = StatusCondition.NONE
-            print(f"{pokemon.name} cured its status with Lum Berry!")
-            pokemon.item = None  # Berry is consumed
-    
-    def calculate_damage(self, attacker: Pokemon, defender: Pokemon, move: Move) -> Tuple[int, bool, float]:
-        """Calculate damage using the official Pokemon damage formula with all modifiers"""
-        if move.category == 'Status':
-            return 0, False, 1.0
-        
-        # Check if move hits
-        accuracy = move.accuracy
-        if attacker.stat_changes.accuracy != 0:
-            accuracy *= attacker.stat_changes.get_multiplier('accuracy')
-        if defender.stat_changes.evasion != 0:
-            accuracy /= defender.stat_changes.get_multiplier('evasion')
-        
-        if random.randint(1, 100) > accuracy:
-            return -1, False, 0  # Miss
-        
-        # Determine attack and defense stats
-        if move.category == 'Physical':
-            attack_stat = attacker.get_effective_stat('attack')
-            defense_stat = defender.get_effective_stat('defense')
-        else:  # Special
-            attack_stat = attacker.get_effective_stat('sp_attack')
-            defense_stat = defender.get_effective_stat('sp_defense')
-        
-        # Apply item modifiers
-        if attacker.item:
-            if attacker.item.name == 'Choice Band' and move.category == 'Physical':
-                attack_stat = int(attack_stat * attacker.item.value['attack'])
-            elif attacker.item.name == 'Choice Specs' and move.category == 'Special':
-                attack_stat = int(attack_stat * attacker.item.value['sp_attack'])
-            elif attacker.item.name == 'Life Orb':
-                attack_stat = int(attack_stat * attacker.item.value)
-        
-        # Base damage calculation
-        level_factor = (2 * attacker.level + 10) / 250
-        attack_ratio = attack_stat / defense_stat
-        base_damage = (level_factor * attack_ratio * move.power + 2)
-        
-        # Apply modifiers
-        modifier = 1.0
-        
-        # Random factor (85-100%)
-        modifier *= random.uniform(0.85, 1.0)
-        
-        # STAB (Same Type Attack Bonus)
-        if move.type in attacker.types:
-            modifier *= 1.5
-        
-        # Type effectiveness
-        type_effectiveness = 1.0
-        for defender_type in defender.types:
-            capitalized_move_type = move.type.capitalize()
-            capitalized_defender_type = defender_type.capitalize()
-            if capitalized_move_type in TYPE_EFFECTIVENESS:
-                effectiveness = TYPE_EFFECTIVENESS[capitalized_move_type].get(capitalized_defender_type, 1.0)
-                type_effectiveness *= effectiveness
-        modifier *= type_effectiveness
-        
-        # Weather modifiers
-        if self.battlefield.weather == Weather.RAIN:
-            if move.type == 'Water':
-                modifier *= 1.5
-            elif move.type == 'Fire':
-                modifier *= 0.5
-        elif self.battlefield.weather == Weather.HARSH_SUNLIGHT:
-            if move.type == 'Fire':
-                modifier *= 1.5
-            elif move.type == 'Water':
-                modifier *= 0.5
-        
-        # Critical hit (6.25% chance)
-        is_critical = random.randint(1, 16) == 1
-        if is_critical:
-            modifier *= 1.5
-        
-        
-        final_damage = int(base_damage * modifier)
-        
-        # Ensure at least 1 damage if not immune
-        if final_damage < 1 and modifier > 0:
-            final_damage = 1
-        
-        return final_damage, is_critical, modifier
-    
-    def apply_secondary_effects(self, attacker: Pokemon, defender: Pokemon, move: Move):
-        """Apply secondary effects of moves"""
-        for effect in move.secondary_effects:
-            if random.randint(1, 100) <= effect.chance:
-                target = attacker if effect.target == 'self' else defender
-                
-                if effect.effect_type == 'status':
-                    if target.status == StatusCondition.NONE:
-                        target.status = effect.value
-                        print(f"{target.name} is {effect.value.value}!")
-                
-                elif effect.effect_type == 'stat_change':
-                    for stat, change in effect.value.items():
-                        current = getattr(target.stat_changes, stat)
-                        new_value = max(-6, min(6, current + change))
-                        setattr(target.stat_changes, stat, new_value)
-                        
-                        if change > 0:
-                            print(f"{target.name}'s {stat} rose!")
-                        else:
-                            print(f"{target.name}'s {stat} fell!")
-                
-                elif effect.effect_type == 'flinch':
-                    if VolatileStatus.FLINCH not in target.volatile_status:
-                        target.volatile_status.append(VolatileStatus.FLINCH)
-                        print(f"{target.name} flinched!")
-                
-                elif effect.effect_type == 'volatile_status':
-                    if effect.value not in target.volatile_status:
-                        target.volatile_status.append(effect.value)
-                        if effect.value == VolatileStatus.CONFUSED:
-                            target.confusion_turns = random.randint(1, 4)
-                            print(f"{target.name} became confused!")
-    
-    def execute_status_move(self, user: Pokemon, target: Pokemon, move: Move):
-        """Execute status moves"""
-        print(f"{user.name} uses {move.name}!")
-        
-        # Weather moves
-        if move.name == 'Sunny Day':
-            self.battlefield.weather = Weather.HARSH_SUNLIGHT
-            self.battlefield.weather_turns = 5
-            print("The sunlight turned harsh!")
-        
-        elif move.name == 'Rain Dance':
-            self.battlefield.weather = Weather.RAIN
-            self.battlefield.weather_turns = 5
-            print("It started to rain!")
-        
-        elif move.name == 'Sandstorm':
-            self.battlefield.weather = Weather.SANDSTORM
-            self.battlefield.weather_turns = 5
-            print("A sandstorm kicked up!")
-        
-        # Healing moves
-        elif move.name in ['Roost', 'Recover', 'Synthesis']:
-            heal_amount = user.max_hp // 2
-            if move.name == 'Synthesis':
-                if self.battlefield.weather == Weather.HARSH_SUNLIGHT:
-                    heal_amount = int(user.max_hp * 0.67)
-                elif self.battlefield.weather in [Weather.RAIN, Weather.SANDSTORM, Weather.HAIL]:
-                    heal_amount = user.max_hp // 4
-            user.hp = min(user.max_hp, user.hp + heal_amount)
-            print(f"{user.name} restored {heal_amount} HP!")
-        
-        # Stat-changing moves
-        elif move.name == 'Swords Dance':
-            user.stat_changes.attack = min(6, user.stat_changes.attack + 2)
-            print(f"{user.name}'s Attack rose sharply!")
-        
-        elif move.name == 'Calm Mind':
-            user.stat_changes.sp_attack = min(6, user.stat_changes.sp_attack + 1)
-            user.stat_changes.sp_defense = min(6, user.stat_changes.sp_defense + 1)
-            print(f"{user.name}'s Sp. Attack and Sp. Defense rose!")
-        
-        elif move.name == 'Agility':
-            user.stat_changes.speed = min(6, user.stat_changes.speed + 2)
-            print(f"{user.name}'s Speed rose sharply!")
-        
-        elif move.name == 'Double Team':
-            user.stat_changes.evasion = min(6, user.stat_changes.evasion + 1)
-            print(f"{user.name}'s evasiveness rose!")
-        
-        elif move.name == 'Withdraw':
-            user.stat_changes.defense = min(6, user.stat_changes.defense + 1)
-            print(f"{user.name}'s Defense rose!")
-        
-        # Status-inflicting moves
-        elif move.name == 'Sleep Powder':
-            if target.status == StatusCondition.NONE:
-                target.status = StatusCondition.SLEEP
-                target.sleep_turns = random.randint(1, 3)
-                print(f"{target.name} fell asleep!")
-            else:
-                print(f"{target.name} is already affected by a status condition!")
-        
-        elif move.name == 'Thunder Wave':
-            if target.status == StatusCondition.NONE and 'Electric' not in target.types:
-                target.status = StatusCondition.PARALYSIS
-                print(f"{target.name} is paralyzed!")
-            else:
-                print("The move had no effect!")
-        
-        elif move.name == 'Toxic':
-            if target.status == StatusCondition.NONE:
-                target.status = StatusCondition.BADLY_POISON
-                target.sleep_turns = 1  # Use as poison counter
-                print(f"{target.name} is badly poisoned!")
-            else:
-                print(f"{target.name} is already affected by a status condition!")
-        
-        elif move.name == 'Leech Seed':
-            if VolatileStatus.LEECH_SEED not in target.volatile_status and 'Grass' not in target.types:
-                target.volatile_status.append(VolatileStatus.LEECH_SEED)
-                print(f"{target.name} was seeded!")
-            else:
-                print("The move had no effect!")
-        
-        # Hazard moves
-        elif move.name == 'Stealth Rock':
-            opponent_side = 'opponent' if user == self.player_pokemon else 'player'
-            if opponent_side not in self.battlefield.hazards:
-                self.battlefield.hazards[opponent_side] = []
-            if 'Stealth Rock' not in self.battlefield.hazards[opponent_side]:
-                self.battlefield.hazards[opponent_side].append('Stealth Rock')
-                print("Pointed stones float in the air around the opposing team!")
-        
-        # Screen moves
-        elif move.name == 'Light Screen':
-            print(f"{user.name} set up Light Screen!")
-        
-        elif move.name == 'Reflect':
-            print(f"{user.name} set up Reflect!")
-    
-    def check_status_prevention(self, pokemon: Pokemon) -> bool:
-        """Check if Pokemon can act despite status conditions"""
-        if pokemon.status == StatusCondition.SLEEP:
-            if pokemon.sleep_turns > 0:
-                pokemon.sleep_turns -= 1
-                print(f"{pokemon.name} is fast asleep!")
-                return False
-            else:
-                pokemon.status = StatusCondition.NONE
-                print(f"{pokemon.name} woke up!")
-        
-        elif pokemon.status == StatusCondition.FREEZE:
-            if random.randint(1, 5) == 1:
-                pokemon.status = StatusCondition.NONE
-                print(f"{pokemon.name} thawed out!")
-            else:
-                print(f"{pokemon.name} is frozen solid!")
-                return False
-        
-        elif pokemon.status == StatusCondition.PARALYSIS:
-            if random.randint(1, 4) == 1:
-                print(f"{pokemon.name} is paralyzed! It can't move!")
-                return False
-        
-        # Check confusion
-        if VolatileStatus.CONFUSED in pokemon.volatile_status:
-            if pokemon.confusion_turns > 0:
-                pokemon.confusion_turns -= 1
-                print(f"{pokemon.name} is confused!")
-                if random.randint(1, 2) == 1:
-                    damage = pokemon.get_effective_stat('attack') // 10
-                    pokemon.hp = max(0, pokemon.hp - damage)
-                    print(f"{pokemon.name} hurt itself in confusion! (-{damage} HP)")
-                    return False
-            else:
-                pokemon.volatile_status.remove(VolatileStatus.CONFUSED)
-                print(f"{pokemon.name} snapped out of confusion!")
-        
-        return True
-    
-    def get_type_effectiveness_text(self, effectiveness: float) -> str:
-        """Get text description of type effectiveness"""
-        if effectiveness > 1:
-            return "It's super effective!"
-        elif effectiveness < 1 and effectiveness > 0:
-            return "It's not very effective..."
-        elif effectiveness == 0:
-            return "It has no effect!"
-        else:
-            return ""
-    
-    def display_battle_state(self):
-        """Display the current battle state"""
-        print("\n" + "="*60)
-        print(f"TURN {self.turn_count} - BATTLE STATUS")
-        print("="*60)
-        
-        # Display weather
-        if self.battlefield.weather != Weather.CLEAR:
-            weather_text = {
-                Weather.RAIN: "Rain is falling!",
-                Weather.HARSH_SUNLIGHT: "The sunlight is harsh!",
-                Weather.SANDSTORM: "A sandstorm is raging!",
-                Weather.HAIL: "Hail is falling!",
-                Weather.SNOW: "Snow is falling!"
-            }
-            print(f"Weather: {weather_text[self.battlefield.weather]} ({self.battlefield.weather_turns} turns left)")
-        
-        # Display hazards
-        for side, hazards in self.battlefield.hazards.items():
-            if hazards:
-                print(f"{side.title()} hazards: {', '.join(hazards)}")
-        
-        print()
-        self.print_animated_health_bar(self.player_pokemon)
-        print(f"Nature: {self.player_pokemon.nature}")
-        
-        print()
-        self.print_animated_health_bar(self.opponent_pokemon)
-        print(f"Nature: {self.opponent_pokemon.nature}")
-        print("="*60)
-    
-    def player_turn(self):
-        """Handle player's turn with autocomplete and struggle support"""
-        print(f"\n{self.player_pokemon.name}'s turn!")
-        # Check status conditions
-        if not self.check_status_prevention(self.player_pokemon):
-            return None
-        # Check if all moves are out of PP (Struggle)
-        if all(move.pp == 0 for move in self.player_pokemon.moves):
-            print("All moves are out of PP! {self.player_pokemon.name} used Struggle!")
-            return Move('Struggle', 'Normal', 'Physical', 50, 100, 1, 1, [], 0, True, description="A desperate attack that also hurts the user.")
-        print("Choose a move:")
-        move_names = [f"{move.name} ({move.pp}/{move.max_pp} PP)" for move in self.player_pokemon.moves]
-        move_completer = WordCompleter([move.name for move in self.player_pokemon.moves], ignore_case=True)
-        for i, move in enumerate(self.player_pokemon.moves):
-            pp_text = f"{move.pp}/{move.max_pp} PP"
-            priority_text = f" (Priority: {move.priority})" if move.priority != 0 else ""
-            print(f"{i+1}. {move.name} ({move.type}, {move.category}, {move.power} power, {pp_text}){priority_text}")
-        while True:
-            try:
-                choice = prompt("Enter move name or number (1-4): ", completer=move_completer).strip()
-                if choice.isdigit():
-                    idx = int(choice) - 1
-                    if 0 <= idx < len(self.player_pokemon.moves):
-                        selected_move = self.player_pokemon.moves[idx]
-                    else:
-                        print("Invalid choice! Please choose 1-4.")
-                        continue
-                else:
-                    idx = next((i for i, m in enumerate(self.player_pokemon.moves) if m.name.lower() == choice.lower()), None)
-                    if idx is not None:
-                        selected_move = self.player_pokemon.moves[idx]
-                    else:
-                        print("Invalid move name!")
-                        continue
-                if selected_move.pp > 0:
-                    selected_move.pp -= 1
-                    return selected_move
-                else:
-                    print("That move is out of PP!")
-            except Exception:
-                print("Please enter a valid move name or number!")
-    
-    def opponent_turn(self):
-        """Handle opponent's turn (AI)"""
-        print(f"\n{self.opponent_pokemon.name}'s turn!")
-        
-        # Check status conditions
-        if not self.check_status_prevention(self.opponent_pokemon):
-            return None
-        
-        # Simple AI: choose a random move with PP, prefer damaging moves
-        available_moves = [move for move in self.opponent_pokemon.moves if move.pp > 0]
-        if not available_moves:
-            print(f"{self.opponent_pokemon.name} has no moves left!")
-            return None
-        
-        # AI strategy: prefer damaging moves when opponent is healthy
-        damaging_moves = [move for move in available_moves if move.category in ['Physical', 'Special']]
-        if damaging_moves and self.player_pokemon.hp > self.player_pokemon.max_hp // 2:
-            selected_move = random.choice(damaging_moves)
-        else:
-            selected_move = random.choice(available_moves)
-        
-        selected_move.pp -= 1
-        print(f"{self.opponent_pokemon.name} uses {selected_move.name}!")
-        return selected_move
-    
-    def execute_move(self, attacker: Pokemon, defender: Pokemon, move: Move):
-        """Execute a move and display results, with Struggle and move lock support"""
-        # Move lock (Choice items)
-        if hasattr(attacker, 'locked_move') and attacker.locked_move:
-            if move.name != attacker.locked_move:
-                print(f"{attacker.name} is locked into {attacker.locked_move}!")
-                move = next((m for m in attacker.moves if m.name == attacker.locked_move), move)
-        # Struggle
-        if move.name == 'Struggle':
-            print(f"{attacker.name} used Struggle!")
-            damage = max(1, attacker.max_hp // 4)
-            defender.hp = max(0, defender.hp - damage)
-            print(f"{defender.name} takes {damage} damage!")
-            recoil = max(1, attacker.max_hp // 4)
-            attacker.hp = max(0, attacker.hp - recoil)
-            print(f"{attacker.name} is hurt by recoil! (-{recoil} HP)")
-            time.sleep(0.5)
-            self.print_animated_health_bar(defender)
-            return
-        if move.category == 'Status':
-            self.execute_status_move(attacker, defender, move)
-            return
-        result = self.calculate_damage(attacker, defender, move)
-        if result[0] == -1:
-            print(f"{attacker.name}'s attack missed!")
-            return
-        damage, is_critical, modifier = result
-        if is_critical:
-            print("Critical hit!")
-        # Type effectiveness message
-        type_effectiveness = 1.0
-        for defender_type in defender.types:
-            capitalized_move_type = move.type.capitalize()
-            capitalized_defender_type = defender_type.capitalize()
-            if capitalized_move_type in TYPE_EFFECTIVENESS:
-                effectiveness = TYPE_EFFECTIVENESS[capitalized_move_type].get(capitalized_defender_type, 1.0)
-                type_effectiveness *= effectiveness
-        effectiveness_text = self.get_type_effectiveness_text(type_effectiveness)
-        if effectiveness_text:
-            print(effectiveness_text)
-        # Focus Sash check
-        if defender.item and defender.item.name == 'Focus Sash' and defender.hp == defender.max_hp and damage >= defender.hp:
-            damage = defender.hp - 1
-            print(f"{defender.name} held on with Focus Sash!")
-            defender.item = None
-        # Apply damage
-        defender.hp = max(0, defender.hp - damage)
-        print(f"{defender.name} takes {damage} damage!")
-        # Apply secondary effects
-        if defender.hp > 0:
-            self.apply_secondary_effects(attacker, defender, move)
-        # Apply contact abilities
-        if move.contact and defender.ability and defender.ability.name == 'Static' and random.randint(1, 3) == 1:
-            if attacker.status == StatusCondition.NONE:
-                attacker.status = StatusCondition.PARALYSIS
-                print(f"{attacker.name} was paralyzed by Static!")
-        elif move.contact and defender.ability and defender.ability.name == 'Rough Skin':
-            damage = attacker.max_hp // 8
-            attacker.hp = max(0, attacker.hp - damage)
-            print(f"{attacker.name} was hurt by Rough Skin! (-{damage} HP)")
-        # Life Orb recoil
-        if attacker.item and attacker.item.name == 'Life Orb' and move.category != 'Status':
-            recoil = attacker.max_hp // 10
-            attacker.hp = max(0, attacker.hp - recoil)
-            print(f"{attacker.name} lost HP due to Life Orb! (-{recoil} HP)")
-        # Move lock (Choice items)
-        if attacker.item and attacker.item.name in ['Choice Band', 'Choice Specs', 'Choice Scarf']:
-            if not hasattr(attacker, 'locked_move') or not attacker.locked_move:
-                attacker.locked_move = move.name
-        # Animate health bar change
-        time.sleep(0.5)
-        self.print_animated_health_bar(defender)
-    
-    def end_turn_effects(self):
-        """Apply end-of-turn effects"""
-        # Weather countdown
-        if self.battlefield.weather_turns > 0:
-            self.battlefield.weather_turns -= 1
-            if self.battlefield.weather_turns == 0:
-                self.battlefield.weather = Weather.CLEAR
-                print("The weather cleared up!")
-        
-        # Apply effects to both Pokemon
-        for pokemon in [self.player_pokemon, self.opponent_pokemon]:
-            if pokemon.hp > 0:
-                self.apply_weather_effects(pokemon)
-                self.apply_status_effects(pokemon)
-                self.apply_item_effects(pokemon)
-                
-                # Leech Seed
-                if VolatileStatus.LEECH_SEED in pokemon.volatile_status:
-                    drain = pokemon.max_hp // 8
-                    pokemon.hp = max(0, pokemon.hp - drain)
-                    opponent = self.opponent_pokemon if pokemon == self.player_pokemon else self.player_pokemon
-                    opponent.hp = min(opponent.max_hp, opponent.hp + drain)
-                    print(f"{pokemon.name}'s HP is sapped by Leech Seed! (-{drain} HP)")
-            # Cap HP at max_hp after all effects
-            if pokemon.hp > pokemon.max_hp:
-                pokemon.hp = pokemon.max_hp
-    
-    def battle_loop(self):
-        """Main battle loop"""
-        print(f"\n🔥 BATTLE START! 🔥")
-        print(f"{self.player_pokemon.name} vs {self.opponent_pokemon.name}")
-        
-        while self.player_pokemon.hp > 0 and self.opponent_pokemon.hp > 0:
-            self.turn_count += 1
-            self.display_battle_state()
-            
-            # Get moves
-            player_move = self.player_turn()
-            opponent_move = self.opponent_turn()
-            
-            # Determine turn order (priority, then speed)
-            player_priority = player_move.priority if player_move else -10
-            opponent_priority = opponent_move.priority if opponent_move else -10
-            
-            player_speed = self.player_pokemon.get_effective_stat('speed')
-            opponent_speed = self.opponent_pokemon.get_effective_stat('speed')
-            
-            # Choice Scarf speed boost
-            if self.player_pokemon.item and self.player_pokemon.item.name == 'Choice Scarf':
-                player_speed = int(player_speed * 1.5)
-            if self.opponent_pokemon.item and self.opponent_pokemon.item.name == 'Choice Scarf':
-                opponent_speed = int(opponent_speed * 1.5)
-            
-            # Determine who goes first
-            if player_priority > opponent_priority:
-                first, second = (self.player_pokemon, player_move), (self.opponent_pokemon, opponent_move)
-            elif opponent_priority > player_priority:
-                first, second = (self.opponent_pokemon, opponent_move), (self.player_pokemon, player_move)
-            elif player_speed > opponent_speed:
-                first, second = (self.player_pokemon, player_move), (self.opponent_pokemon, opponent_move)
-            elif opponent_speed > player_speed:
-                first, second = (self.opponent_pokemon, opponent_move), (self.player_pokemon, player_move)
-            else:
-                # Speed tie - random
-                if random.randint(1, 2) == 1:
-                    first, second = (self.player_pokemon, player_move), (self.opponent_pokemon, opponent_move)
-                else:
-                    first, second = (self.opponent_pokemon, opponent_move), (self.player_pokemon, player_move)
-            
-            # Execute moves
-            attacker, move = first
-            defender = self.opponent_pokemon if attacker == self.player_pokemon else self.player_pokemon
-            
-            if move and attacker.hp > 0:
-                self.execute_move(attacker, defender, move)
-            
-            if defender.hp <= 0:
-                break
-            
-            attacker, move = second
-            defender = self.opponent_pokemon if attacker == self.player_pokemon else self.player_pokemon
-            
-            if move and attacker.hp > 0:
-                self.execute_move(attacker, defender, move)
-            
-            if defender.hp <= 0:
-                break
-            
-            # End of turn effects
-            self.end_turn_effects()
-            
-            time.sleep(1)
-        
-        # Battle end
-        print("\n" + "="*60)
-        if self.player_pokemon.hp <= 0:
-            print(f"💀 {self.player_pokemon.name} fainted! You lose!")
-        else:
-            print(f"🎉 {self.opponent_pokemon.name} fainted! You win!")
-        print("="*60)
-    
-    def customize_pokemon(self, pokemon: Pokemon) -> Pokemon:
-        """Allow player to customize Pokemon moveset, nature, item, and ability"""
-        print(f"\n⚙️ Customizing {pokemon.name} ⚙️")
-        
-        # Choose nature
-        print("\nSelect Nature:")
-        nature_list = list(NATURES.keys())
-        for i, nature in enumerate(nature_list[:10]):  # Show first 10 natures
-            effect = NATURES[nature]
-            if effect['increased'] and effect['decreased']:
-                print(f"{i+1}. {nature} (+{effect['increased']}, -{effect['decreased']})")
-            else:
-                print(f"{i+1}. {nature} (Neutral)")
-        
-        print("11. More natures...")
-        print("0. Keep current")
-        
-        choice = input("Enter choice (0-11): ")
-        if choice.isdigit() and 1 <= int(choice) <= 10:
-            pokemon.nature = nature_list[int(choice) - 1]
-            pokemon.apply_nature()
-            print(f"Nature set to {pokemon.nature}")
-        
-        # Choose ability
-        abilities = POKEMON_DATABASE[pokemon.name]['abilities']
-        if len(abilities) > 1:
-            print(f"\nSelect Ability:")
-            for i, ability in enumerate(abilities):
-                print(f"{i+1}. {ability.name} - {ability.description}")
-            
-            choice = input(f"Enter choice (1-{len(abilities)}): ")
-            if choice.isdigit() and 1 <= int(choice) <= len(abilities):
-                pokemon.ability = abilities[int(choice) - 1]
-                print(f"Ability set to {pokemon.ability.name}")
-        
-        # Choose item
-        print(f"\nSelect Item:")
-        item_list = list(ITEMS.keys())
-        for i, item_name in enumerate(item_list[:10]):  # Show first 10 items
-            item = ITEMS[item_name]
-            print(f"{i+1}. {item.name} - {item.description}")
-        
-        print("11. More items...")
-        print("0. No item")
-        
-        choice = input("Enter choice (0-11): ")
-        if choice.isdigit() and 1 <= int(choice) <= 10:
-            pokemon.item = ITEMS[item_list[int(choice) - 1]]
-            print(f"Item set to {pokemon.item.name}")
-        elif choice == "0":
-            pokemon.item = None
-            print("No item equipped")
-        
-        # Customize moveset
-        print(f"\nCurrent moveset:")
-        for i, move in enumerate(pokemon.moves):
-            print(f"{i+1}. {move.name} ({move.type}, {move.category}, {move.power} power)")
-        
-        if input("\nCustomize moveset? (y/n): ").lower() == 'y':
-            available_moves = POKEMON_DATABASE[pokemon.name]['level_up_moves']
-            print(f"\nAvailable moves for {pokemon.name}:")
-            for i, move in enumerate(available_moves):
-                print(f"{i+1}. {move.name} ({move.type}, {move.category}, {move.power} power)")
-            
-            print("\nSelect 4 moves (enter numbers separated by spaces):")
-            choice = input("Example: 1 3 5 7: ")
-            try:
-                indices = [int(x) - 1 for x in choice.split()]
-                if len(indices) == 4 and all(0 <= i < len(available_moves) for i in indices):
-                    pokemon.moves = [deepcopy(available_moves[i]) for i in indices]
-                    print("Moveset updated!")
-                else:
-                    print("Invalid selection. Keeping current moveset.")
-            except:
-                print("Invalid input. Keeping current moveset.")
-        
-        return pokemon
-    
-    def select_pokemon(self, is_player: bool = True) -> Pokemon:
-        """Let user search for and select a Pokémon by name (using PokéAPI) with autocomplete and apply competitive moveset/EVs/IVs/item/nature/ability"""
-        player_type = "your" if is_player else "opponent"
-        # For autocomplete, fetch a list of Pokémon names from PokéAPI (first 1000 for speed)
+def _parse_hp_token(tok: str) -> Tuple[Optional[int], Optional[int], Optional[int], bool]:
+    # returns (hp, maxhp, hp_pct, fainted)
+    tok = tok.strip()
+    if 'fnt' in tok:
+        return 0, None, 0, True
+    if '/' in tok:
         try:
-            resp = requests.get(f"{API}/pokemon?limit=1500")
-            resp.raise_for_status()
-            poke_names = [p['name'] for p in resp.json().get('results', [])]
+            cur, maximum = tok.split('/', 1)
+            cur_i = int(cur)
+            max_i = int(maximum)
+            pct = int(round((cur_i / max_i) * 100)) if max_i else None
+            return cur_i, max_i, pct, False
         except Exception:
-            poke_names = []
-        poke_completer = WordCompleter(poke_names, ignore_case=True)
-        while True:
-            name = prompt(f"\nEnter the name of {player_type} Pokémon: ", completer=poke_completer).strip().lower()
-            try:
-                # Use return_moveset to get the best competitive set
-                moveset = return_moveset(name)
-                if not moveset:
-                    print("No competitive moveset found for this Pokémon. Using default PokéAPI data.")
-                    pokemon = self.create_pokemon(name, {})
-                    print(f"Selected: {pokemon.name}")
-                    return pokemon
-                # Apply moveset fields
-                print(f"\n[DEBUG] Applying competitive moveset for {name.title()}:")
-                #print(json.dumps(moveset, indent=2))
-                # Moves
-                moves = moveset.get("moves", [])
-                # Nature
-                nature = moveset.get("nature", "Hardy")
-                # Ability
-                ability = moveset.get("ability")
-                # Item
-                item = moveset.get("item")
-                # EVs/IVs
-                evs = moveset.get("evs", {})
-                ivs = moveset.get("ivs", {})
-                # Create Pokémon with these fields
-                pokemon = self.create_pokemon(name, moveset=moveset, nature=nature, item_name=item)
-                # Set ability if present
-                if ability:
-                    # Try to match ability from POKEMON_DATABASE if possible
-                    db_abilities = POKEMON_DATABASE.get(pokemon.name, {}).get("abilities", [])
-                    for ab in db_abilities:
-                        if ab.name.lower() == ability.lower():
-                            pokemon.ability = ab
-                            break
-                    else:
-                        pokemon.ability = Ability(ability, "Competitive set ability", "")
-                # Set moves (overwrite with competitive set)
-                if moves:
-                    move_objs = []
-                    for move_name in moves:
-                        # Only process if move_name is a string and not a dict key
-                        if not isinstance(move_name, str):
-                            continue
-                        # Defensive: skip if move_name is a known non-move field
-                        if move_name.lower() in ["moves", "item", "nature", "ability", "evs", "ivs", "format", "set_name"]:
-                            continue
-                        try:
-                            move_data = fetch_move_data(move_name)
-                            move_objs.append(Move(
-                                name=move_data["name"].title().replace("-", " "),
-                                type=move_data["type"]["name"],
-                                category=move_data["damage_class"]["name"].title(),
-                                power=move_data["power"] or 0,
-                                accuracy=move_data["accuracy"] or 100,
-                                pp=move_data["pp"] or 10,
-                                max_pp=move_data["pp"] or 10,
-                                secondary_effects=[],
-                                priority=move_data["priority"] or 0,
-                                contact=False,
-                                description=next((e["short_effect"] for e in move_data["effect_entries"] if e["language"]["name"] == "en"), "")
-                            ))
-                        except Exception as e:
-                            print(f"[DEBUG] Could not fetch move {move_name}: {e}")
-                    if move_objs:
-                        pokemon.moves = move_objs
-                # Set EVs (Effort Values)
-                if evs:
-                    total_evs = 0
-                    for stat, value in evs.items():
-                        if stat in ["hp", "attack", "defense", "sp_attack", "sp_defense", "speed"]:
-                            base_stat = getattr(pokemon, stat)
-                            ev_bonus = (value // 4)
-                            setattr(pokemon, stat, base_stat + ev_bonus)
-                            total_evs += value
-                    # Cap HP at max_hp after EVs
-                    if pokemon.hp > pokemon.max_hp:
-                        pokemon.hp = pokemon.max_hp
-                    print(f"[DEBUG] Applied EVs: {evs} (total: {total_evs})")
-                # Set IVs (Individual Values) - for debugging, just print, as stats are already maxed
-                if ivs:
-                    print(f"[DEBUG] IVs: {ivs}")
-                # Set item (already set in create_pokemon)
-                if item:
-                    print(f"[DEBUG] Item: {item}")
-                # Set nature
-                if nature:
-                    print(f"[DEBUG] Nature: {nature}")
-                # Set ability
-                if ability:
-                    print(f"[DEBUG] Ability: {ability}")
-                print(f"[DEBUG] Moves: {moves}")
-                print(f"Selected: {pokemon.name}")
-                # Ask if user wants to override
-                if is_player:
-                    override = prompt("Override with manual customization? (y/n): ").strip().lower()
-                    if override == "y":
-                        pokemon = self.customize_pokemon(pokemon)
-                # Reset move lock if present
-                if hasattr(pokemon, 'locked_move'):
-                    pokemon.locked_move = None
-                return pokemon
-            except requests.HTTPError:
-                print("Pokémon not found on PokéAPI. Please try again.")
-            except Exception as e:
-                print(f"Error: {str(e)}")
+            return None, None, None, False
+    return None, None, None, False
 
-    
-    def start_battle(self):
-            """Start a new battle"""
-            print("🌟 Welcome to Pokemon Battle Simulator! 🌟")
-            print("="*50)
-            
-            # Select Pokemon
-            self.player_pokemon = self.select_pokemon(True)
-            self.opponent_pokemon = self.select_pokemon(False)
-            
-            # Start battle
-            self.battle_loop()
-            
-            # Ask for another battle
-            while True:
-                again = input("\nWould you like to battle again? (y/n): ").lower()
-                if again in ['y', 'yes']:
-                    self.start_battle()
-                    break
-                elif again in ['n', 'no']:
-                    print("Thanks for playing! Goodbye!")
-                    break
+def _update_battle_state_from_line(line: str, battle: Dict[str, BattleSide]) -> bool:
+    debug_print(f"Processing battle line: {line.strip()}", "BATTLE_STATE")
+    changed = False
+    if not line or '|' not in line:
+        return False
+    parts = line.strip().split('|')
+    # parts[0] is '' usually for battle messages
+    if len(parts) < 2:
+        return False
+    tag = parts[1]
+    debug_print(f"Battle tag: {tag}, parts: {len(parts)}", "BATTLE_STATE")
+    if tag in ('switch', 'drag') and len(parts) >= 3:
+        side, name = _parse_actor(parts[2])
+        debug_print(f"Pokemon switch/drag - Side: {side}, Name: {name}", "BATTLE_STATE")
+        if side in battle and name:
+            if battle[side].get('name') != name:
+                battle[side]['name'] = name
+                # keep hp until we get a proper hp token; reset fainted
+                battle[side]['fainted'] = False
+                changed = True
+            # switch lines often include an HP token at parts[4]
+            if len(parts) >= 5:
+                hp, maxhp, hp_pct, fainted = _parse_hp_token(parts[4])
+                if fainted:
+                    if battle[side].get('fainted') is not True:
+                        battle[side]['fainted'] = True
+                        battle[side]['hp'] = 0
+                        changed = True
                 else:
-                    print("Please enter 'y' or 'n'")
+                    if hp is not None and battle[side].get('hp') != hp:
+                        battle[side]['hp'] = hp
+                        changed = True
+                    if maxhp is not None and battle[side].get('maxhp') != maxhp:
+                        battle[side]['maxhp'] = maxhp
+                        changed = True
+                    if hp_pct is not None and battle[side].get('hp_pct') != hp_pct:
+                        battle[side]['hp_pct'] = hp_pct
+                        changed = True
+    elif tag in ('-damage', '-heal', '-sethp') and len(parts) >= 4:
+        side, _ = _parse_actor(parts[2])
+        debug_print(f"HP change - Side: {side}, Tag: {tag}", "BATTLE_STATE")
+        if side in battle:
+            hp, maxhp, hp_pct, fainted = _parse_hp_token(parts[3])
+            debug_print(f"HP token parsed - HP: {hp}, MaxHP: {maxhp}, Fainted: {fainted}", "BATTLE_STATE")
+            if fainted:
+                if battle[side].get('fainted') is not True:
+                    battle[side]['fainted'] = True
+                    battle[side]['hp'] = 0
+                    changed = True
+            else:
+                known_max = battle[side].get('maxhp')
+                # Handle percentage-style reports like 91/100
+                if maxhp == 100 and known_max and known_max != 100:
+                    # convert percent to absolute
+                    abs_hp = int(round((hp or 0) * known_max / 100))
+                    if battle[side].get('hp') != abs_hp:
+                        battle[side]['hp'] = abs_hp
+                        changed = True
+                    # keep maxhp as known_max
+                else:
+                    if hp is not None and battle[side].get('hp') != hp:
+                        battle[side]['hp'] = hp
+                        changed = True
+                    if maxhp is not None and battle[side].get('maxhp') != maxhp:
+                        battle[side]['maxhp'] = maxhp
+                        changed = True
+                # Always track hp_pct if available
+                if hp_pct is not None and battle[side].get('hp_pct') != hp_pct:
+                    battle[side]['hp_pct'] = hp_pct
+                    changed = True
+    elif tag == 'faint' and len(parts) >= 3:
+        side, _ = _parse_actor(parts[2])
+        if side in battle and battle[side].get('fainted') is not True:
+            battle[side]['fainted'] = True
+            battle[side]['hp'] = 0
+            changed = True
+    elif tag == '-status' and len(parts) >= 4:
+        side, _ = _parse_actor(parts[2])
+        status = parts[3]
+        if side in battle and battle[side].get('status') != status:
+            battle[side]['status'] = status
+            changed = True
+    elif tag == '-curestatus' and len(parts) >= 4:
+        side, _ = _parse_actor(parts[2])
+        if side in battle and battle[side].get('status') is not None:
+            battle[side]['status'] = None
+            changed = True
+    return changed
+
+def _hp_bar_line(side_label: str, side: BattleSide, width: int = 20) -> str:
+    name = side.get('name') or '?'
+    hp = side.get('hp')
+    maxhp = side.get('maxhp')
+    hp_pct = side.get('hp_pct')
+    fainted = side.get('fainted')
+    status = side.get('status')
+    if fainted:
+        bar = '[' + 'X' * width + ']'
+        info = 'fainted'
+    elif isinstance(hp, int) and isinstance(maxhp, int) and maxhp > 0:
+        ratio = max(0.0, min(1.0, hp / maxhp))
+        filled = int(round(ratio * width))
+        bar = '[' + '█' * filled + '·' * (width - filled) + ']'
+        pct = int(round(ratio * 100))
+        info = f"{hp}/{maxhp} ({pct}%)"
+    elif isinstance(hp_pct, int):
+        ratio = max(0.0, min(1.0, hp_pct / 100))
+        filled = int(round(ratio * width))
+        bar = '[' + '█' * filled + '·' * (width - filled) + ']'
+        info = f"{hp_pct}%"
+    else:
+        bar = '[' + '·' * width + ']'
+        info = '--/--'
+    status_str = f" [{status}]" if status else ''
+    return f"{side_label} {name} {bar} {info}{status_str}"
+
+def _render_overlay(battle: Dict[str, BattleSide]) -> str:
+    return ("\n" +
+            _hp_bar_line('P1:', battle['p1']) + "\n" +
+            _hp_bar_line('P2:', battle['p2']) + "\n")
+
+# ---- Humanized feed helpers ----
+def _side_label(side: Optional[str]) -> str:
+    return side.upper() if side in ("p1", "p2") else "?"
+
+def _humanize_line(line: str) -> Optional[str]:
+    if '|' not in line:
+        return None
+    parts = line.strip().split('|')
+    if len(parts) < 2:
+        return None
+    tag = parts[1]
+    if tag == 'turn' and len(parts) >= 3:
+        return f"-- Turn {parts[2]} --"
+    if tag == 'move' and len(parts) >= 4:
+        side, name = _parse_actor(parts[2])
+        move = parts[3]
+        target = None
+        if len(parts) >= 5:
+            _, target_name = _parse_actor(parts[4])
+            target = target_name
+        base = f"{_side_label(side)} {name} used {move}"
+        if target:
+            base += f" on {target}"
+        return base
+    if tag in ('-supereffective', '-resisted', '-crit', '-miss', '-immune', '-fail'):
+        mapping = {
+            '-supereffective': "It's super effective!",
+            '-resisted': "It's not very effective...",
+            '-crit': "A critical hit!",
+            '-miss': "It missed!",
+            '-immune': "It had no effect.",
+            '-fail': "But it failed!",
+        }
+        return mapping.get(tag)
+    if tag in ('-damage', '-heal', '-sethp') and len(parts) >= 4:
+        side, name = _parse_actor(parts[2])
+        hp = parts[3]
+        if 'fnt' in hp:
+            return f"{name} fainted!"
+        return f"{name}: {hp}"
+    if tag == 'faint' and len(parts) >= 3:
+        _, name = _parse_actor(parts[2])
+        return f"{name} fainted!"
+    if tag == 'switch' and len(parts) >= 3:
+        side, name = _parse_actor(parts[2])
+        return f"{_side_label(side)} sent out {name}"
+    if tag == '-boost' and len(parts) >= 5:
+        side, name = _parse_actor(parts[2])
+        stat = parts[3]
+        amount = parts[4]
+        return f"{name}'s {stat} rose by {amount}!"
+    if tag == '-unboost' and len(parts) >= 5:
+        side, name = _parse_actor(parts[2])
+        stat = parts[3]
+        amount = parts[4]
+        return f"{name}'s {stat} fell by {amount}."
+    if tag == '-status' and len(parts) >= 4:
+        side, name = _parse_actor(parts[2])
+        status = parts[3]
+        return f"{name} is {status}."
+    if tag == '-curestatus' and len(parts) >= 4:
+        side, name = _parse_actor(parts[2])
+        status = parts[3]
+        return f"{name} was cured of {status}."
+    if tag == '-start' and len(parts) >= 4:
+        side, name = _parse_actor(parts[2])
+        what = parts[3]
+        if what == 'typechange' and len(parts) >= 5:
+            return f"{name} became {parts[4]}"
+        return f"{name} started {what}"
+    if tag == 'upkeep':
+        return None
+    if tag == 'win' and len(parts) >= 3:
+        return f"Winner: {parts[2]}"
+    return None
+
+def _process_output(out_lines, humanize: bool, active_side: str, requests: Dict[str, dict], shown_rqid: Dict[str, Optional[int]], battle: Dict[str, BattleSide]) -> Optional[str]:
+    if not out_lines:
+        return None
+    winner: Optional[str] = None
+    overlay_changed = False
+    
+    # Parse requests from the entire stream first
+    debug_print(f"Parsing stream for requests from {len(out_lines)} lines", "REQUESTS")
+    _parse_stream_lines(out_lines, requests)
+    debug_print(f"Requests after parsing: {list(requests.keys())}", "REQUESTS")
+    
+    for line in out_lines:
+        # Print
+        if humanize:
+            msg = _humanize_line(line)
+            if msg:
+                print(msg)
+        else:
+            print(line, end='')
+        # State update
+        try:
+            if _update_battle_state_from_line(line, battle):
+                overlay_changed = True
+        except Exception:
+            pass
+        # Winner
+        if '|win|' in line:
+            winner = line.split('|win|', 1)[1].strip() or 'Unknown'
+    # Overlay
+    if overlay_changed:
+        print(_render_overlay(battle))
+    # Show prompt for new request on active side
+    active_req = requests.get(active_side)
+    if active_req:
+        rqid = active_req.get('rqid')
+        if rqid is None:
+            rqid = hash(str(active_req.get('active')) + str(active_req.get('forceSwitch')) + str(active_req.get('teamPreview')))
+        if shown_rqid.get(active_side) != rqid:
+            if active_req.get('teamPreview'):
+                print("\n[Your team preview is requested] Type: team N,...\n")
+            elif active_req.get('active'):
+                print("\n[Your move is requested] Available moves:")
+                print(_pretty_moves(active_req))
+                print("\nType: move N  or  switch N  (or 'moves'/'switches' to display again)\n")
+            shown_rqid[active_side] = rqid
+    return winner
+
+def pack_team(path: str) -> str:
+    result = subprocess.run(
+        ["node", "teamutils.js", path],
+        capture_output=True,
+        text=True,
+        check=True
+    )
+    return result.stdout.strip()
+
+
+def _pretty_moves(req: dict) -> str:
+    if req and req.get('teamPreview'):
+        return "Team preview in progress. Use 'team N,...' to set order."
+    if not req or 'active' not in req or not req['active']:
+        return "No move request available."
+    active = req['active'][0]
+    if active.get('trapped'):
+        trapped = ' [trapped]'
+    else:
+        trapped = ''
+    out = []
+    moves = active.get('moves', [])
+    for i, m in enumerate(moves, start=1):
+        name = m.get('move') or m.get('id') or f"move{i}"
+        desc = f"{i}. {name} ({m.get('pp','?')}/{m.get('maxpp','?')})"
+        if m.get('disabled'):
+            desc += " [disabled]"
+        if m.get('target'):
+            desc += f" -> {m['target']}"
+        out.append(desc)
+    flags = []
+    if active.get('canMegaEvo'):
+        flags.append('mega')
+    if active.get('canZMove'):
+        flags.append('zmove')
+    if active.get('canDynamax'):
+        flags.append('dmax')
+    if active.get('canGigantamax'):
+        flags.append('gmax')
+    if active.get('canTerastallize'):
+        flags.append('tera')
+    if flags:
+        out.append("Options: " + ", ".join(flags))
+    if trapped:
+        out.append(trapped)
+    return "\n".join(out) or "No moves available."
+
+
+def _pretty_switches(req: dict) -> str:
+    if not req:
+        return "No switch request available."
+    force = req.get('forceSwitch') or [False]
+    if not force[0] and not req.get('teamPreview'):
+        return "Switch not requested."
+    side = req.get('side') or {}
+    pokemon = side.get('pokemon') or []
+    out = []
+    for i, p in enumerate(pokemon, start=1):
+        details = p.get('details', '')
+        condition = p.get('condition', '')
+        # Skip fainted
+        if 'fnt' in condition:
+            continue
+        out.append(f"{i}. {details} [{condition}]")
+    return "\n".join(out) or "No switchable Pokémon."
+
+
+def _help_text(active_side: str = "p1") -> str:
+    return (
+        "Commands (1v1 friendly):\n"
+        "  move N [mega|zmove|dmax|gmax|tera]  - choose a move for your side (also: N, mN, moveN)\n"
+        "  switch N                            - switch to slot N (also: sN)\n"
+        "  team N,...                          - team preview order (e.g. 2,1,3,4,5,6)\n"
+        "  moves                               - show available moves\n"
+        "  switches                            - show switch options\n"
+        "  help                                - show this help\n"
+        "  feed human | feed raw               - toggle summarized/raw stream\n"
+        "\nAdvanced: You can still prefix with p1:/p2: to target a side directly.\n"
+        f"Current default side: {active_side}"
+    )
+
+
+def _parse_stream_lines(lines, requests: Dict[str, dict]) -> None:
+    """Update requests dict from simulator stream output."""
+    current: Optional[str] = None
+    for raw in lines:
+        line = raw.rstrip('\n')
+        # Channel markers can be 'p1'/'p2'/'omniscient' or with a leading '>'
+        if line in ('p1', 'p2', 'omniscient'):
+            current = line
+            continue
+        if line.startswith('>') and ' ' not in line:
+            current = line[1:].strip()
+            continue
+        if '|request|' in line and current in ('p1', 'p2'):
+            try:
+                payload = line.split('|request|', 1)[1]
+                req = json.loads(payload)
+                requests[current] = req
+            except Exception:
+                # Ignore malformed JSON; keep last good request
+                pass
 
 def main():
-    """Main function to run the battle simulator"""
+    debug_print("Starting CLI battle interface", "MAIN")
+    parser = argparse.ArgumentParser()
+    parser.add_argument("p1", help="Path to Player 1 team file (Showdown importable)")
+    parser.add_argument("p2", help="Path to Player 2 team file")
+    parser.add_argument("--format", default="gen7ou")
+    parser.add_argument("--no-auto-preview", action="store_true",
+                        help="Do not auto-pick team preview; prompt for order")
+    parser.add_argument("--side", choices=["p1", "p2"], default="p1",
+                        help="Control this side by default (unprefixed commands)")
+    parser.add_argument("--p2-ai", dest="p2_ai", action="store_true",
+                        help="Make player 2 act automatically with random choices (default)")
+    parser.add_argument("--no-p2-ai", dest="p2_ai", action="store_false",
+                        help="Disable player 2 AI")
+    parser.add_argument("--humanize", dest="humanize", action="store_true",
+                        help="Show a terse humanized feed (summarized events)")
+    parser.add_argument("--raw", dest="humanize", action="store_false",
+                        help="Show raw simulator stream lines")
+    parser.set_defaults(p2_ai=True, humanize=True)
+    args = parser.parse_args()
+    debug_print(f"Command line args parsed: {args}", "MAIN")
+
+    debug_print("Packing team files...", "TEAMS")
+    p1_team = pack_team(args.p1)
+    p2_team = pack_team(args.p2)
+    debug_print(f"P1 team packed length: {len(p1_team)}, P2 team packed length: {len(p2_team)}", "TEAMS")
+
+    debug_print("Initializing Pokemon Showdown simulator...", "SIMULATOR")
+    sim = ShowdownWrapper(formatid=args.format)
+    sim.send(f'>player p1 {{"name":"P1","team":"{p1_team}"}}')
+    sim.send(f'>player p2 {{"name":"P2","team":"{p2_team}"}}')
+    debug_print("Simulator initialized and teams sent", "SIMULATOR")
+
+    # Track current request state for each side
+    requests: Dict[str, dict] = {}
+    # Track last shown request id to avoid spamming
+    shown_rqid: Dict[str, Optional[int]] = {"p1": None, "p2": None}
+    preview_done = set()
+    battle = _new_battle_state()
+
+    print("Battle started. Type 'help' for commands.\n")
+    humanize_mode = args.humanize
+    debug_print("Entering main battle loop", "MAIN")
+
     try:
-        simulator = BattleSimulator()
-        simulator.start_battle()
-    except KeyboardInterrupt:
-        print("\n\nBattle interrupted! Thanks for playing!")
-    except Exception as e:
-        print(f"An error occurred: {e}")
+        while True:
+            # show simulator output and capture requests
+            out = sim.read()
+            debug_print(f"Simulator read output: {len(out) if out else 0} lines", "SIMULATOR")
+            if out:
+                winner = _process_output(out, humanize_mode, args.side, requests, shown_rqid, battle)
+                debug_print(f"Process output result - Winner: {winner}", "MAIN")
+                if winner:
+                    print(f"\nBattle over. Winner: {winner}")
+                    return
+
+                # Auto-handle team preview if required
+                debug_print(f"Checking team preview auto-handling...", "PREVIEW")
+                for side in ("p1", "p2"):
+                    req = requests.get(side)
+                    debug_print(f"Side {side} request: {bool(req)}, has teamPreview: {bool(req and req.get('teamPreview'))}, preview_done: {side in preview_done}", "PREVIEW")
+                    if req and req.get("teamPreview") and side not in preview_done:
+                        team = (req.get("side") or {}).get("pokemon") or []
+                        n = len(team) if team else 0
+                        debug_print(f"Side {side} team preview: {n} Pokemon", "PREVIEW")
+                        if n:
+                            default_order = ",".join(str(i) for i in range(1, n + 1))
+                            debug_print(f"Default team order for {side}: {default_order}", "PREVIEW")
+                            if args.no_auto_preview:
+                                debug_print(f"Manual team preview mode for {side}", "PREVIEW")
+                                print(f"Team preview requested for {side}.")
+                                print("Enter order as comma-separated indices (e.g., 2,1,3,4,5,6)")
+                                print(f"Press Enter for default: {default_order}")
+                                user = input(f"{side} team> ").strip()
+                                order = user if user else default_order
+                                sim.send(f">{side} team {order}")
+                                preview_done.add(side)
+                                print(f"[manual] Sent team preview order for {side}: {order}")
+                                debug_print(f"Manual team preview sent for {side}: {order}", "PREVIEW")
+                            else:
+                                debug_print(f"Auto team preview for {side}: {default_order}", "PREVIEW")
+                                sim.send(f">{side} team {default_order}")
+                                preview_done.add(side)
+                                print(f"[auto] Sent team preview order for {side}: {default_order}")
+                                debug_print(f"Auto team preview sent for {side}: {default_order}", "PREVIEW")
+
+                # further UI is handled inside _process_output
+
+                # If P2 is AI, respond automatically to new P2 requests
+                if args.p2_ai:
+                    ai_req = requests.get('p2')
+                    debug_print(f"P2 AI check - Has request: {bool(ai_req)}", "AI")
+                    if ai_req:
+                        ai_rqid = ai_req.get('rqid')
+                        if ai_rqid is None:
+                            ai_rqid = hash(str(ai_req.get('active')) + str(ai_req.get('forceSwitch')))
+                        debug_print(f"P2 AI request ID: {ai_rqid}, last shown: {shown_rqid.get('p2')}", "AI")
+                        if shown_rqid.get('p2') != ai_rqid:
+                            # Prefer team preview default if needed
+                            if ai_req.get('teamPreview'):
+                                debug_print("P2 AI handling team preview", "AI")
+                                team = (ai_req.get('side') or {}).get('pokemon') or []
+                                n = len(team)
+                                if n:
+                                    order = ",".join(str(i) for i in range(1, n + 1))
+                                    sim.send(f">p2 team {order}")
+                                    print(f"[p2-ai] team {order}")
+                                    debug_print(f"P2 AI sent team order: {order}", "AI")
+                                    shown_rqid['p2'] = ai_rqid
+                                    # Drain any immediate output
+                                    out2 = sim.read()
+                                    if out2:
+                                        w = _process_output(out2, humanize_mode, args.side, requests, shown_rqid, battle)
+                                        if w:
+                                            print(f"\nBattle over. Winner: {w}")
+                                            return
+                            # Handle forced switch
+                            elif (ai_req.get('forceSwitch') or [False])[0]:
+                                debug_print("P2 AI handling forced switch", "AI")
+                                side = ai_req.get('side') or {}
+                                poke = side.get('pokemon') or []
+                                choice = None
+                                for idx, p in enumerate(poke, start=1):
+                                    cond = p.get('condition', '')
+                                    if 'fnt' in cond:
+                                        continue
+                                    # try to avoid active slot if present
+                                    choice = idx
+                                    break
+                                if choice:
+                                    sim.send(f">p2 switch {choice}")
+                                    print(f"[p2-ai] switch {choice}")
+                                    debug_print(f"P2 AI sent switch: {choice}", "AI")
+                                    shown_rqid['p2'] = ai_rqid
+                                    out2 = sim.read()
+                                    if out2:
+                                        w = _process_output(out2, humanize_mode, args.side, requests, shown_rqid, battle)
+                                        if w:
+                                            print(f"\nBattle over. Winner: {w}")
+                                            return
+                            # Handle moves
+                            elif ai_req.get('active'):
+                                debug_print("P2 AI handling moves", "AI")
+                                moves = (ai_req.get('active') or [{}])[0].get('moves', [])
+                                choices = [i + 1 for i, m in enumerate(moves) if not m.get('disabled')]
+                                if not choices and moves:
+                                    choices = [1]
+                                if choices:
+                                    pick = random.choice(choices)
+                                    sim.send(f">p2 move {pick}")
+                                    print(f"[p2-ai] move {pick}")
+                                    debug_print(f"P2 AI sent move: {pick}", "AI")
+                                    shown_rqid['p2'] = ai_rqid
+                                    out2 = sim.read()
+                                    if out2:
+                                        w = _process_output(out2, humanize_mode, args.side, requests, shown_rqid, battle)
+                                        if w:
+                                            print(f"\nBattle over. Winner: {w}")
+                                            return
+
+            # get user input
+            prompt_side = args.side.upper()
+            cmd = input(f"{prompt_side}> ")
+            debug_print(f"User input: '{cmd}'", "INPUT")
+            if not cmd:
+                continue
+            if cmd.lower() in ("quit", "exit"):
+                debug_print("User requested exit", "INPUT")
+                break
+
+            # prepend proper prefix
+            if cmd == 'help':
+                print(_help_text(args.side))
+                continue
+
+            # Introspection helpers
+            if cmd.startswith('p1:') and cmd[3:].strip() in ('moves', 'switches'):
+                action = cmd[3:].strip()
+                req = requests.get('p1')
+                if action == 'moves':
+                    print(_pretty_moves(req))
+                else:
+                    print(_pretty_switches(req))
+                continue
+            if cmd.startswith('p2:') and cmd[3:].strip() in ('moves', 'switches'):
+                action = cmd[3:].strip()
+                req = requests.get('p2')
+                if action == 'moves':
+                    print(_pretty_moves(req))
+                else:
+                    print(_pretty_switches(req))
+                continue
+
+            # 1v1-friendly unprefixed commands for the active side
+            lower = cmd.lower().strip()
+            if lower in ("moves", "switches"):
+                req = requests.get(args.side)
+                if lower == "moves":
+                    print(_pretty_moves(req))
+                else:
+                    print(_pretty_switches(req))
+                continue
+            # Allow bare numbers as 'move N'
+            if lower.isdigit():
+                sim.send(f">{args.side} move {lower}")
+                print(f"[sent] {args.side} move {lower}")
+                debug_print(f"Sent move command: {args.side} move {lower}", "COMMAND")
+                out = sim.read()
+                if out:
+                    w = _process_output(out, humanize_mode, args.side, requests, shown_rqid, battle)
+                    if w:
+                        print(f"\nBattle over. Winner: {w}")
+                        return
+                continue
+            # Accept tight forms like 'move3', 'm1', 's2'
+            if lower.startswith('move') and lower[4:].strip().isdigit():
+                num = ''.join(ch for ch in lower[4:] if ch.isdigit())
+                sim.send(f">{args.side} move {num}")
+                print(f"[sent] {args.side} move {num}")
+                debug_print(f"Sent move command (tight form): {args.side} move {num}", "COMMAND")
+                out = sim.read()
+                if out:
+                    w = _process_output(out, humanize_mode, args.side, requests, shown_rqid, battle)
+                    if w:
+                        print(f"\nBattle over. Winner: {w}")
+                        return
+                continue
+            if lower.startswith('m') and lower[1:].isdigit():
+                num = lower[1:]
+                sim.send(f">{args.side} move {num}")
+                print(f"[sent] {args.side} move {num}")
+                debug_print(f"Sent move command (m shorthand): {args.side} move {num}", "COMMAND")
+                out = sim.read()
+                if out:
+                    w = _process_output(out, humanize_mode, args.side, requests, shown_rqid, battle)
+                    if w:
+                        print(f"\nBattle over. Winner: {w}")
+                        return
+                continue
+            if lower.startswith('s') and lower[1:].isdigit():
+                num = lower[1:]
+                sim.send(f">{args.side} switch {num}")
+                print(f"[sent] {args.side} switch {num}")
+                debug_print(f"Sent switch command: {args.side} switch {num}", "COMMAND")
+                out = sim.read()
+                if out:
+                    w = _process_output(out, humanize_mode, args.side, requests, shown_rqid, battle)
+                    if w:
+                        print(f"\nBattle over. Winner: {w}")
+                        return
+                continue
+            if lower.startswith("move ") or lower.startswith("switch ") or lower.startswith("team "):
+                sim.send(f">{args.side} {cmd.strip()}")
+                print(f"[sent] {args.side} {cmd.strip()}")
+                debug_print(f"Sent full command: {args.side} {cmd.strip()}", "COMMAND")
+                out = sim.read()
+                if out:
+                    w = _process_output(out, humanize_mode, args.side, requests, shown_rqid, battle)
+                    if w:
+                        print(f"\nBattle over. Winner: {w}")
+                        return
+                continue
+            # 'team' alone -> default ordering if preview pending
+            if lower == 'team':
+                debug_print("Processing 'team' command", "COMMAND")
+                req = requests.get(args.side) or {}
+                team = (req.get('side') or {}).get('pokemon') or []
+                n = len(team)
+                if req.get('teamPreview') and n:
+                    order = ",".join(str(i) for i in range(1, n + 1))
+                    sim.send(f">{args.side} team {order}")
+                    print(f"[sent] {args.side} team {order}")
+                    out = sim.read()
+                    if out:
+                        w = _process_output(out, humanize_mode, args.side, requests, shown_rqid, battle)
+                        if w:
+                            print(f"\nBattle over. Winner: {w}")
+                            return
+                    continue
+
+            # runtime toggle for humanized/raw feed
+            if lower in ("feed human", "feed raw"):
+                humanize_mode = (lower == "feed human")
+                print(f"[feed] {'humanized' if humanize_mode else 'raw'}")
+                continue
+
+            if cmd.startswith("p1:"):
+                sim.send(f">p1 {cmd[3:].strip()}")
+                print(f"[sent] p1 {cmd[3:].strip()}")
+                out = sim.read()
+                if out:
+                    w = _process_output(out, humanize_mode, args.side, requests, shown_rqid, battle)
+                    if w:
+                        print(f"\nBattle over. Winner: {w}")
+                        return
+            elif cmd.startswith("p2:"):
+                sim.send(f">p2 {cmd[3:].strip()}")
+                print(f"[sent] p2 {cmd[3:].strip()}")
+                out = sim.read()
+                if out:
+                    w = _process_output(out, humanize_mode, args.side, requests, shown_rqid, battle)
+                    if w:
+                        print(f"\nBattle over. Winner: {w}")
+                        return
+            else:
+                print("Invalid command. Try 'help' or use: move N | switch N | moves | switches | team N,...  (or prefix with p1:/p2:)")
+    finally:
+        sim.close()
 
 if __name__ == "__main__":
     main()

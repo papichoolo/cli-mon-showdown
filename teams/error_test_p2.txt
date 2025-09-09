@@ -1,0 +1,53 @@
+Charizard @ Choice Specs
+Ability: Solar Power
+EVs: 4 HP / 252 SpA / 252 Spe
+Modest Nature
+- Fire Blast
+- Solar Beam
+- Dragon Pulse
+- Focus Blast
+
+Tyranitar @ Choice Scarf
+Ability: Sand Stream
+EVs: 4 HP / 252 Atk / 252 Spe
+Jolly Nature
+- Stone Edge
+- Crunch
+- Earthquake
+- Fire Punch
+
+Gengar @ Choice Specs
+Ability: Cursed Body
+EVs: 4 HP / 252 SpA / 252 Spe
+Timid Nature
+- Shadow Ball
+- Sludge Bomb
+- Focus Blast
+- Thunderbolt
+
+Heracross @ Choice Scarf
+Ability: Guts
+EVs: 4 HP / 252 Atk / 252 Spe
+Jolly Nature
+- Close Combat
+- Megahorn
+- Stone Edge
+- Night Slash
+
+Starmie @ Choice Specs
+Ability: Natural Cure
+EVs: 4 HP / 252 SpA / 252 Spe
+Timid Nature
+- Hydro Pump
+- Psychic
+- Ice Beam
+- Thunderbolt
+
+Dragonite @ Choice Band
+Ability: Multiscale
+EVs: 4 HP / 252 Atk / 252 Spe
+Adamant Nature
+- Outrage
+- Earthquake
+- Fire Punch
+- Thunder Punch

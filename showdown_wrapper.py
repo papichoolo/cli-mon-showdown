@@ -3,7 +3,7 @@ import threading
 import queue
 import time
 
-DEBUG = True
+DEBUG = False
 
 def debug_print(message, category="DEBUG"):
     if DEBUG:

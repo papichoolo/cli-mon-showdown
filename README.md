@@ -2,6 +2,8 @@
 
 A command-line Pokémon battle simulator that integrates with Pokémon Showdown's simulator engine for accurate battle mechanics, team building, and competitive play.
 
+**Note:Pokemon Showndown is required for the CLI to work so dont forget to clone https://github.com/smogon/pokemon-showdown.git**
+ 
 ## Features
 
 - **Pokémon Showdown Integration**: Uses the official Pokémon Showdown simulator for accurate battle mechanics

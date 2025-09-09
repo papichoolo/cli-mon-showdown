@@ -6,14 +6,12 @@ import time
 import shutil
 import sys
 from typing import Dict, Optional, Tuple, List
+import showdown_wrapper
 from showdown_wrapper import ShowdownWrapper
-
-# Debug flag - default False to keep UI clean (enable with env or manual toggle)
-DEBUG = False
 
 def debug_print(msg: str, prefix: str = "DEBUG"):
     """Print debug messages if debugging is enabled"""
-    if DEBUG:
+    if showdown_wrapper.DEBUG:
         print(f"[{prefix}] {msg}")
 
 # ---- Minimal ANSI UI window ----
@@ -432,13 +430,37 @@ def _humanize_line(line: str) -> Optional[str]:
         if hp.endswith('/100'):
             return None
         return f"{name}: {hp}"
+    if tag in ('-residual', '-recoil', '-drain') and len(parts) >= 4:
+        side, name = _parse_actor(parts[2])
+        if tag == '-residual':
+            return f"{name} was hurt by residual damage!"
+        if tag == '-recoil':
+            return f"{name} was hurt by recoil!"
+        if tag == '-drain':
+            return f"{name} absorbed health!"
     if tag == 'faint' and len(parts) >= 3:
         _, name = _parse_actor(parts[2])
         return f"{name} fainted!"
     if tag in ('switch', 'drag') and len(parts) >= 3:
         side, name = _parse_actor(parts[2])
         verb = "sent out" if tag == 'switch' else "was dragged out"
-        return f"{_side_label(side)} {verb} {name}"
+        msg = f"{_side_label(side)} {verb} {name}"
+        if len(parts) >= 5:
+            hp = parts[4]
+            if hp:
+                msg += f" ({hp})"
+        return msg
+    if tag == 'mega' and len(parts) >= 4:
+        side, name = _parse_actor(parts[2])
+        return f"{name} Mega-Evolved!"
+    if tag == '-formechange' and len(parts) >= 4:
+        side, name = _parse_actor(parts[2])
+        new_form = parts[3]
+        return f"{name} transformed into {new_form}!"
+    if tag == 'detailschange' and len(parts) >= 4:
+        side, name = _parse_actor(parts[2])
+        details = parts[3]
+        return f"{name} changed to {details}!"
     if tag == '-boost' and len(parts) >= 5:
         side, name = _parse_actor(parts[2])
         stat = parts[3]
@@ -451,6 +473,11 @@ def _humanize_line(line: str) -> Optional[str]:
         amount = parts[4]
         levels = "sharply " if int(amount) >= 2 else ""
         return f"{name}'s {stat} {levels}fell!"
+    if tag == '-clearboost' and len(parts) >= 3:
+        side, name = _parse_actor(parts[2])
+        return f"{name}'s stat changes were cleared!"
+    if tag == '-clearallboost':
+        return "All stat changes were reset!"
     if tag == '-status' and len(parts) >= 4:
         side, name = _parse_actor(parts[2])
         status = parts[3]
@@ -483,6 +510,8 @@ def _humanize_line(line: str) -> Optional[str]:
         return f"{name} ended {effect}"
     if tag == 'win' and len(parts) >= 3:
         return f"🎉 Winner: {parts[2]} 🎉"
+    if tag == 'tie':
+        return "The battle ended in a tie!"
     if tag == '-weather' and len(parts) >= 3:
         weather = parts[2]
         weather_names = {
@@ -499,7 +528,42 @@ def _humanize_line(line: str) -> Optional[str]:
             return "Stealth Rock was set up!"
         elif 'Spikes' in field_effect:
             return "Spikes were set up!"
+        elif 'Toxic Spikes' in field_effect:
+            return "Toxic Spikes were set up!"
+        elif 'Sticky Web' in field_effect:
+            return "Sticky Web was set up!"
         return f"Field effect: {field_effect}"
+    if tag == '-fieldend' and len(parts) >= 3:
+        field_effect = parts[2]
+        if 'Stealth Rock' in field_effect:
+            return "Stealth Rock was removed!"
+        elif 'Spikes' in field_effect:
+            return "Spikes were removed!"
+        elif 'Toxic Spikes' in field_effect:
+            return "Toxic Spikes were removed!"
+        elif 'Sticky Web' in field_effect:
+            return "Sticky Web was removed!"
+        return f"Field effect ended: {field_effect}"
+    if tag in ('-sidestart', '-sideend') and len(parts) >= 4:
+        side = parts[2]
+        effect = parts[3]
+        if 'move:' in effect:
+            effect = effect.split('move: ')[1]
+        if tag == '-sidestart':
+            return f"{effect} protected {_side_label(side)}'s team."
+        return f"{_side_label(side)}'s {effect} wore off."
+    if tag in ('-item', '-enditem') and len(parts) >= 4:
+        side, name = _parse_actor(parts[2])
+        item = parts[3]
+        if tag == '-item':
+            return f"{name} obtained {item}!"
+        return f"{name} consumed its {item}!"
+    if tag in ('-ability', 'ability') and len(parts) >= 4:
+        side, name = _parse_actor(parts[2])
+        ability = parts[3]
+        if tag == 'ability':
+            return f"{name}'s {ability} was revealed!"
+        return f"{name}'s {ability} activated!"
     if tag == 'cant' and len(parts) >= 4:
         side, name = _parse_actor(parts[2])
         reason = parts[3]
@@ -887,7 +951,6 @@ def _show_pokemon_showdown_menu(req: dict, battle: Dict[str, BattleSide], active
             raise  # Re-raise KeyboardInterrupt to handle gracefully in main loop
 
 def main():
-    debug_print("Starting improved CLI battle interface", "MAIN")
     parser = argparse.ArgumentParser()
     parser.add_argument("p1", help="Path to Player 1 team file (Showdown importable)")
     parser.add_argument("p2", help="Path to Player 2 team file")
@@ -908,11 +971,16 @@ def main():
                         help="Render an in-terminal game window (default)")
     parser.add_argument("--no-window", dest="window", action="store_false",
                         help="Disable the in-terminal game window")
+    parser.add_argument("--debug", action="store_true", help="Enable debug printing.")
     parser.set_defaults(p2_ai=True, humanize=True, window=True)
     args = parser.parse_args()
+
+    if args.debug:
+        showdown_wrapper.DEBUG = True
+    
+    debug_print("Starting improved CLI battle interface", "MAIN")
     debug_print(f"Command line args parsed: {args}", "MAIN")
 
-    debug_print("Packing team files...", "TEAMS")
     try:
         p1_team = pack_team(args.p1)
         p2_team = pack_team(args.p2)
@@ -943,6 +1011,8 @@ def main():
     shown_rqid: Dict[str, Optional[int]] = {"p1": None, "p2": None}
     ai_error_count = {'p2': 0}  # Track AI errors to prevent infinite loops
     max_ai_errors = 3  # Maximum errors before forcing different action
+    ai_loop_counter = 0  # Track consecutive AI attempts without simulator response
+    max_ai_loops = 15   # Prevent infinite loops
     preview_done = set()
     battle = _new_battle_state()
 
@@ -960,6 +1030,7 @@ def main():
             out = sim.wait_for_output()
             debug_print(f"Simulator output: {len(out) if out else 0} lines", "SIMULATOR")
             if out:
+                ai_loop_counter = 0  # Reset counter when we get simulator output
                 result = _process_output(out, humanize_mode, args.side, requests, shown_rqid, battle, ai_error_count, ui)
                 # Handle the updated return value (winner, player_error_detected)
                 if isinstance(result, tuple):
@@ -1012,7 +1083,7 @@ def main():
                             debug_print(f"Auto team preview sent for {side}: {default_order}", "PREVIEW")
                             continue  # Continue to process response immediately
 
-            # Handle AI for P2
+            # Handle AI for P2 - prioritize forced switches over wait requests
             if args.p2_ai:
                 ai_req = requests.get('p2')
                 debug_print(f"P2 AI check - Has request: {bool(ai_req)}", "AI")
@@ -1021,23 +1092,17 @@ def main():
                     if ai_rqid is None:
                         ai_rqid = hash(str(ai_req.get('active')) + str(ai_req.get('forceSwitch')) + str(ai_req.get('wait')))
                     debug_print(f"P2 AI request ID: {ai_rqid}, last shown: {shown_rqid.get('p2')}", "AI")
-                    if shown_rqid.get('p2') != ai_rqid:
-                        # Handle "wait": true requests (Pokemon can't move due to paralysis, flinch, etc.)
-                        if ai_req.get('wait'):
-                            debug_print("P2 AI has wait request - Pokemon can't move", "AI")
-                            note = f"[p2-ai] Pokemon can't move"
-                            if ui and ui.enabled:
-                                ui.add_feed(note)
-                                ui.render(battle)
-                            else:
-                                print(note)
-                            shown_rqid['p2'] = ai_rqid
-                            continue  # Continue to process response immediately
-                        # Handle forced switch
-                        elif (ai_req.get('forceSwitch') or [False])[0]:
+                    
+                    # Special handling for forced switches - always process them even if request ID is the same
+                    # because consecutive KOs can generate the same request ID
+                    force_switch = (ai_req.get('forceSwitch') or [False])[0]
+                    
+                    if force_switch or shown_rqid.get('p2') != ai_rqid:
+                        # Handle forced switch FIRST (higher priority than wait)
+                        if (ai_req.get('forceSwitch') or [False])[0]:
                             debug_print("P2 AI handling forced switch", "AI")
                             # Debug: print the full request to understand the data structure
-                            if DEBUG:
+                            if showdown_wrapper.DEBUG:
                                 print(f"[DEBUG] Forced switch request: {ai_req}")
                             switches = _get_forced_switch_options(ai_req)
                             debug_print(f"P2 AI forced switch options: {[s['index'] for s in switches]}", "AI")
@@ -1052,11 +1117,31 @@ def main():
                                     print(note)
                                 debug_print(f"P2 AI sent switch: {choice}", "AI")
                                 shown_rqid['p2'] = ai_rqid
+                                ai_loop_counter = 0  # Reset counter on successful action
                                 continue  # Continue to process response immediately
                             else:
                                 debug_print("P2 AI: No valid switches available for forced switch!", "AI")
-                                # This shouldn't happen in a normal game, but let's handle it gracefully
+                                # Check if this is end of game scenario (all Pokemon fainted)
+                                all_fainted = all(poke.get('condition', '').endswith('fnt') 
+                                                for poke in ai_req.get('side', {}).get('pokemon', []))
+                                if all_fainted:
+                                    debug_print("P2 AI: All Pokemon fainted - game should end", "AI")
+                                    # Send forfeit to end the game gracefully
+                                    sim.send(">p2 forfeit")
+                                    debug_print("P2 AI: Sent forfeit due to no available Pokemon", "AI")
                                 shown_rqid['p2'] = ai_rqid
+                                break
+                        # Handle "wait": true requests (Pokemon can't move due to paralysis, flinch, etc.)
+                        elif ai_req.get('wait'):
+                            debug_print("P2 AI has wait request - Pokemon can't move", "AI")
+                            note = f"[p2-ai] Pokemon can't move"
+                            if ui and ui.enabled:
+                                ui.add_feed(note)
+                                ui.render(battle)
+                            else:
+                                print(note)
+                            shown_rqid['p2'] = ai_rqid
+                            continue  # Continue to process response immediately
                         # Handle moves
                         elif ai_req.get('active'):
                             debug_print("P2 AI handling moves", "AI")
@@ -1105,7 +1190,19 @@ def main():
                                         print(note)
                                     debug_print(f"P2 AI sent move: {pick}", "AI")
                                     shown_rqid['p2'] = ai_rqid
+                                    ai_loop_counter = 0  # Reset counter on successful action
                                     continue  # Continue to process response immediately
+
+            # AI loop detection - prevent infinite loops when simulator doesn't respond
+            if args.p2_ai and requests.get('p2'):
+                ai_loop_counter += 1
+                debug_print(f"AI loop counter: {ai_loop_counter}/{max_ai_loops}", "AI")
+                if ai_loop_counter >= max_ai_loops:
+                    debug_print("AI loop limit reached - simulator not responding, ending battle", "AI")
+                    if ui and ui.enabled:
+                        ui.add_feed("Battle ended due to technical issues")
+                        ui.render(battle)
+                    break
 
             # Check if we need player input
             player_req = requests.get(args.side)
@@ -1125,7 +1222,12 @@ def main():
                         else:
                             print(f"\n{note}")
                         shown_rqid[args.side] = player_rqid
-                        # Don't prompt for input, just continue processing
+                        # After handling a wait request, immediately check for new output
+                        # This helps catch any pending forced switches for the AI
+                        additional_out = sim.wait_for_output(timeout=0.1)
+                        if additional_out:
+                            debug_print(f"Got additional output after wait: {len(additional_out)} lines", "WAIT_RECOVERY")
+                            _parse_stream_lines(additional_out, requests)
                         continue
                 
                 # Handle normal requests (active moves or forced switches)

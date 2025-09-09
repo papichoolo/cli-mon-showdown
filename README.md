@@ -14,12 +14,27 @@ A command-line Pokémon battle simulator that integrates with Pokémon Showdown'
 
 ## Project Structure
 
-- `cli_improved.py` — Enhanced CLI battle simulator (main entry point)
-- `cli.py` — Original CLI battle simulator
+
+- `cli.py` — CLI battle simulator
 - `showdown_wrapper.py` — Python wrapper for Pokémon Showdown simulator
 - `teamutils.js` — Team parsing and utilities using @pkmn libraries
 - `teams/` — Sample team files in Showdown format
 - `BATTLE_FIXES.md` — Documentation of battle system improvements
+
+
+## CLI Flags
+
+| Flag | Description |
+| ---- | ----------- |
+| `p1` | Path to Player 1’s team file in Showdown export format (required). |
+| `p2` | Path to Player 2’s team file (required). |
+| `--format FORMAT` | Pokémon Showdown battle format ID (default: `gen7ou`). |
+| `--no-auto-preview` | Disable automatic team preview ordering; prompt for manual order. |
+| `--side {p1,p2}` | Side controlled via unprefixed commands in the CLI (default: `p1`). |
+| `--p2-ai` / `--no-p2-ai` | Enable (default) or disable random move selection for Player 2. |
+| `--humanize` / `--raw` | Show human‑friendly event summaries (default) or raw Showdown log lines. |
+| `--window` / `--no-window` | Render the in-terminal game window (default) or show plain text output. |
+
 
 ## Prerequisites
 
@@ -59,7 +74,7 @@ A command-line Pokémon battle simulator that integrates with Pokémon Showdown'
 
 ### Basic Battle Simulation
 ```powershell
-python cli_improved.py teams/p1.txt teams/p2.txt
+python cli.py teams/p1.txt teams/p2.txt
 ```
 
 ### Team Utilities

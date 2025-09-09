@@ -788,12 +788,11 @@ def _show_pokemon_showdown_menu(req: dict, battle: Dict[str, BattleSide], active
                 raise  # Re-raise to handle gracefully in main loop
     
     # Normal turn menu
-    print(f"\nWhat will {active_pokemon} do?")
-    print("  1. Fight")
-    print("  2. Pokemon")
-    
     while True:
         try:
+            print(f"\nWhat will {active_pokemon} do?")
+            print("  1. Fight")
+            print("  2. Pokemon")
             main_choice = input("\nChoose an option: ").strip()
             
             if main_choice == "1":  # Fight

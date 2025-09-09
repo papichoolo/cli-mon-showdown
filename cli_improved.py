@@ -432,13 +432,37 @@ def _humanize_line(line: str) -> Optional[str]:
         if hp.endswith('/100'):
             return None
         return f"{name}: {hp}"
+    if tag in ('-residual', '-recoil', '-drain') and len(parts) >= 4:
+        side, name = _parse_actor(parts[2])
+        if tag == '-residual':
+            return f"{name} was hurt by residual damage!"
+        if tag == '-recoil':
+            return f"{name} was hurt by recoil!"
+        if tag == '-drain':
+            return f"{name} absorbed health!"
     if tag == 'faint' and len(parts) >= 3:
         _, name = _parse_actor(parts[2])
         return f"{name} fainted!"
     if tag in ('switch', 'drag') and len(parts) >= 3:
         side, name = _parse_actor(parts[2])
         verb = "sent out" if tag == 'switch' else "was dragged out"
-        return f"{_side_label(side)} {verb} {name}"
+        msg = f"{_side_label(side)} {verb} {name}"
+        if len(parts) >= 5:
+            hp = parts[4]
+            if hp:
+                msg += f" ({hp})"
+        return msg
+    if tag == 'mega' and len(parts) >= 4:
+        side, name = _parse_actor(parts[2])
+        return f"{name} Mega-Evolved!"
+    if tag == '-formechange' and len(parts) >= 4:
+        side, name = _parse_actor(parts[2])
+        new_form = parts[3]
+        return f"{name} transformed into {new_form}!"
+    if tag == 'detailschange' and len(parts) >= 4:
+        side, name = _parse_actor(parts[2])
+        details = parts[3]
+        return f"{name} changed to {details}!"
     if tag == '-boost' and len(parts) >= 5:
         side, name = _parse_actor(parts[2])
         stat = parts[3]
@@ -451,6 +475,11 @@ def _humanize_line(line: str) -> Optional[str]:
         amount = parts[4]
         levels = "sharply " if int(amount) >= 2 else ""
         return f"{name}'s {stat} {levels}fell!"
+    if tag == '-clearboost' and len(parts) >= 3:
+        side, name = _parse_actor(parts[2])
+        return f"{name}'s stat changes were cleared!"
+    if tag == '-clearallboost':
+        return "All stat changes were reset!"
     if tag == '-status' and len(parts) >= 4:
         side, name = _parse_actor(parts[2])
         status = parts[3]
@@ -483,6 +512,8 @@ def _humanize_line(line: str) -> Optional[str]:
         return f"{name} ended {effect}"
     if tag == 'win' and len(parts) >= 3:
         return f"🎉 Winner: {parts[2]} 🎉"
+    if tag == 'tie':
+        return "The battle ended in a tie!"
     if tag == '-weather' and len(parts) >= 3:
         weather = parts[2]
         weather_names = {
@@ -499,7 +530,42 @@ def _humanize_line(line: str) -> Optional[str]:
             return "Stealth Rock was set up!"
         elif 'Spikes' in field_effect:
             return "Spikes were set up!"
+        elif 'Toxic Spikes' in field_effect:
+            return "Toxic Spikes were set up!"
+        elif 'Sticky Web' in field_effect:
+            return "Sticky Web was set up!"
         return f"Field effect: {field_effect}"
+    if tag == '-fieldend' and len(parts) >= 3:
+        field_effect = parts[2]
+        if 'Stealth Rock' in field_effect:
+            return "Stealth Rock was removed!"
+        elif 'Spikes' in field_effect:
+            return "Spikes were removed!"
+        elif 'Toxic Spikes' in field_effect:
+            return "Toxic Spikes were removed!"
+        elif 'Sticky Web' in field_effect:
+            return "Sticky Web was removed!"
+        return f"Field effect ended: {field_effect}"
+    if tag in ('-sidestart', '-sideend') and len(parts) >= 4:
+        side = parts[2]
+        effect = parts[3]
+        if 'move:' in effect:
+            effect = effect.split('move: ')[1]
+        if tag == '-sidestart':
+            return f"{effect} protected {_side_label(side)}'s team."
+        return f"{_side_label(side)}'s {effect} wore off."
+    if tag in ('-item', '-enditem') and len(parts) >= 4:
+        side, name = _parse_actor(parts[2])
+        item = parts[3]
+        if tag == '-item':
+            return f"{name} obtained {item}!"
+        return f"{name} consumed its {item}!"
+    if tag in ('-ability', 'ability') and len(parts) >= 4:
+        side, name = _parse_actor(parts[2])
+        ability = parts[3]
+        if tag == 'ability':
+            return f"{name}'s {ability} was revealed!"
+        return f"{name}'s {ability} activated!"
     if tag == 'cant' and len(parts) >= 4:
         side, name = _parse_actor(parts[2])
         reason = parts[3]
@@ -788,12 +854,11 @@ def _show_pokemon_showdown_menu(req: dict, battle: Dict[str, BattleSide], active
                 raise  # Re-raise to handle gracefully in main loop
     
     # Normal turn menu
-    print(f"\nWhat will {active_pokemon} do?")
-    print("  1. Fight")
-    print("  2. Pokemon")
-    
     while True:
         try:
+            print(f"\nWhat will {active_pokemon} do?")
+            print("  1. Fight")
+            print("  2. Pokemon")
             main_choice = input("\nChoose an option: ").strip()
             
             if main_choice == "1":  # Fight

@@ -34,6 +34,7 @@ A command-line Pokémon battle simulator that integrates with Pokémon Showdown'
 | `--p2-ai` / `--no-p2-ai` | Enable (default) or disable random move selection for Player 2. |
 | `--humanize` / `--raw` | Show human‑friendly event summaries (default) or raw Showdown log lines. |
 | `--window` / `--no-window` | Render the in-terminal game window (default) or show plain text output. |
+|`--debug`| Enables Debugging Mode|
 
 
 ## Prerequisites

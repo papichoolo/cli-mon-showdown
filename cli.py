@@ -30,7 +30,7 @@ class GameWindow:
         self.enabled = enabled and sys.stdout.isatty()
         size = shutil.get_terminal_size(fallback=(80, 24))
         self.width = max(60, min(120, size.columns))
-        self.feed_lines = max(4, min(15, feed_lines))
+        self.feed_lines = max(10, min(15, feed_lines))
         self.feed: List[str] = []
         self.mounted = False
         self.last_render = ""  # Cache last render to avoid unnecessary redraws
@@ -150,10 +150,16 @@ class GameWindow:
         feed_title = self._color(' Battle Log ', 'cyan')
         feed_header = '│' + (feed_title + '─' * max(0, (w - 2 - len(' Battle Log ') - 1))).ljust(w - 2, '─') + '│'
         lines.append(feed_header)
-        recent = self.feed[-self.feed_lines:]
-        for i in range(self.feed_lines):
-            text = recent[i] if i < len(recent) else ''
+        # Show more lines in the feed (up to twice the feed_lines)
+        max_feed_display = self.feed_lines * 2
+        recent = self.feed[-max_feed_display:]
+        # Only display the last feed_lines lines, but allow scrolling if needed
+        display_lines = recent[-self.feed_lines:]
+        for text in display_lines:
             lines.append('│ ' + text.ljust(w - 3) + '│')
+        # Pad with empty lines if display_lines is shorter than feed_lines
+        for _ in range(self.feed_lines - len(display_lines)):
+            lines.append('│ ' + ''.ljust(w - 3) + '│')
 
         lines.append(bot)
 
@@ -980,7 +986,9 @@ def main():
     
     debug_print("Starting improved CLI battle interface", "MAIN")
     debug_print(f"Command line args parsed: {args}", "MAIN")
-
+   
+   
+    # Pack teams
     try:
         p1_team = pack_team(args.p1)
         p2_team = pack_team(args.p2)
@@ -1027,7 +1035,7 @@ def main():
     try:
         while True:
             # Wait for and process simulator output
-            out = sim.wait_for_output()
+            out = sim.wait_for_output(timeout=1.0)
             debug_print(f"Simulator output: {len(out) if out else 0} lines", "SIMULATOR")
             if out:
                 ai_loop_counter = 0  # Reset counter when we get simulator output
@@ -1049,6 +1057,25 @@ def main():
                     else:
                         print(f"\n{msg}")
                     return
+                
+                # Check for double KO scenario
+                p1_fainted = battle.get('p1', {}).get('fainted', False)
+                p2_fainted = battle.get('p2', {}).get('fainted', False)
+                if p1_fainted and p2_fainted:
+                    # This is a potential double KO. Check if the game is about to end or if players can switch.
+                    p1_req = requests.get('p1', {})
+                    p2_req = requests.get('p2', {})
+
+                    # Check if players have non-fainted pokemon to switch to
+                    p1_can_switch = any(not p.get('condition', '').endswith('fnt') for p in p1_req.get('side', {}).get('pokemon', []) if not p.get('active'))
+                    p2_can_switch = any(not p.get('condition', '').endswith('fnt') for p in p2_req.get('side', {}).get('pokemon', []) if not p.get('active'))
+
+                    # If both active pokemon are fainted and at least one player has no pokemon left, it's a loss/tie.
+                    if not p1_can_switch or not p2_can_switch:
+                         debug_print("Double KO detected, but one player has no remaining Pokemon. Game should end.", "MAIN")
+                    else:
+                        # Both players have fainted active pokemon but also have pokemon to switch to. This is the problematic state.
+                        raise Exception("Double KO detected: Both active Pokemon fainted simultaneously.")
                 
                 # If a player error was detected, force a short wait to get updated requests
                 if player_error_detected:
@@ -1082,7 +1109,16 @@ def main():
                                 print(note)
                             debug_print(f"Auto team preview sent for {side}: {default_order}", "PREVIEW")
                             continue  # Continue to process response immediately
-
+            else:
+                debug_print("No simulator output received", "SIMULATOR")
+                # Increment AI loop counter when no output is received
+                if args.p2_ai:
+                    ai_loop_counter += 1
+                    ai_error_count['p2'] += 1  # Increment error count as well
+                    debug_print(f"AI loop counter incremented to {ai_loop_counter}", "AI")
+                    if ai_loop_counter >= max_ai_loops:
+                        raise Exception("AI appears stuck in a loop without simulator response.")   
+                time.sleep(0.1)  # Prevent busy waiting
             # Handle AI for P2 - prioritize forced switches over wait requests
             if args.p2_ai:
                 ai_req = requests.get('p2')
@@ -1285,6 +1321,7 @@ def main():
             debug_print("Simulator closed successfully", "MAIN")
         except Exception as e:
             debug_print(f"Error closing simulator: {e}", "MAIN_ERROR")
+
 
 if __name__ == "__main__":
     main()

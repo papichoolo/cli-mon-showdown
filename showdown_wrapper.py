@@ -26,9 +26,13 @@ class ShowdownWrapper:
             debug_print(f"Failed to start subprocess: {e}", "WRAPPER")
             raise
         
+        # Queues and listener threads for stdout and stderr
         self.q = queue.Queue()
+        self.err_q = queue.Queue()
         self.listener = threading.Thread(target=self._enqueue_output, daemon=True)
+        self.err_listener = threading.Thread(target=self._enqueue_stderr, daemon=True)
         self.listener.start()
+        self.err_listener.start()
         debug_print("Output listener thread started", "WRAPPER")
         self.send(f'>start {{"formatid":"{formatid}"}}')
         debug_print(f"Sent start command for format: {formatid}", "WRAPPER")
@@ -42,6 +46,18 @@ class ShowdownWrapper:
         except Exception as e:
             debug_print(f"Error in output listener: {e}", "WRAPPER")
         debug_print("Output listener ended", "WRAPPER")
+
+    def _enqueue_stderr(self):
+        """Continuously read simulator stderr to avoid deadlocks and aid debugging."""
+        debug_print("Error listener started", "WRAPPER")
+        try:
+            for line in self.proc.stderr:
+                # Mirror stderr to debug to surface simulator issues
+                debug_print(f"[stderr] {line.strip()}", "WRAPPER")
+                self.err_q.put(line)
+        except Exception as e:
+            debug_print(f"Error in error listener: {e}", "WRAPPER")
+        debug_print("Error listener ended", "WRAPPER")
 
     def send(self, msg: str):
         if not msg.endswith("\n"):
@@ -87,9 +103,16 @@ class ShowdownWrapper:
             
             # If no lines yet, wait a short time before checking again
             time.sleep(0.05)
-        
+
+            # If the process died, stop waiting early
+            if self.proc.poll() is not None:
+                break
+
         debug_print(f"Wait for output collected {len(lines)} lines", "WRAPPER")
         return lines
 
     def close(self):
-        self.proc.terminate()
+        try:
+            self.proc.terminate()
+        except Exception:
+            pass

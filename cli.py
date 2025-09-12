@@ -30,7 +30,7 @@ class GameWindow:
         self.enabled = enabled and sys.stdout.isatty()
         size = shutil.get_terminal_size(fallback=(80, 24))
         self.width = max(60, min(120, size.columns))
-        self.feed_lines = max(4, min(15, feed_lines))
+        self.feed_lines = max(10, min(15, feed_lines))
         self.feed: List[str] = []
         self.mounted = False
         self.last_render = ""  # Cache last render to avoid unnecessary redraws
@@ -150,10 +150,16 @@ class GameWindow:
         feed_title = self._color(' Battle Log ', 'cyan')
         feed_header = '│' + (feed_title + '─' * max(0, (w - 2 - len(' Battle Log ') - 1))).ljust(w - 2, '─') + '│'
         lines.append(feed_header)
-        recent = self.feed[-self.feed_lines:]
-        for i in range(self.feed_lines):
-            text = recent[i] if i < len(recent) else ''
+        # Show more lines in the feed (up to twice the feed_lines)
+        max_feed_display = self.feed_lines * 2
+        recent = self.feed[-max_feed_display:]
+        # Only display the last feed_lines lines, but allow scrolling if needed
+        display_lines = recent[-self.feed_lines:]
+        for text in display_lines:
             lines.append('│ ' + text.ljust(w - 3) + '│')
+        # Pad with empty lines if display_lines is shorter than feed_lines
+        for _ in range(self.feed_lines - len(display_lines)):
+            lines.append('│ ' + ''.ljust(w - 3) + '│')
 
         lines.append(bot)
 
@@ -187,6 +193,9 @@ class GameWindow:
 # ---- Lightweight 1v1 battle state for reactive UI ----
 BattleSide = Dict[str, Optional[object]]  # name, hp, maxhp, status, fainted
 
+# Monotonic per-side request sequence used to dedupe actions when rqid is missing/unchanged
+_REQUEST_SEQ: Dict[str, int] = {"p1": 0, "p2": 0}
+
 def _new_battle_state() -> Dict[str, BattleSide]:
     return {
         'p1': {'name': None, 'hp': None, 'maxhp': None, 'hp_pct': None, 'status': None, 'fainted': False},
@@ -202,27 +211,48 @@ def _parse_actor(token: str) -> Tuple[Optional[str], Optional[str]]:
     return None, None
 
 def _parse_hp_token(tok: str) -> Tuple[Optional[int], Optional[int], Optional[int], bool]:
-    # returns (hp, maxhp, hp_pct, fainted)
-    tok = tok.strip()
-    if 'fnt' in tok:
+    """Parse an HP token from Showdown stream.
+    Returns (hp, maxhp, hp_pct, fainted).
+
+    Handles forms like:
+      - "182/319"
+      - "182/319 slp" (status suffix)
+      - "75/100" (percentage style)
+      - "0 fnt" or "0/352 fnt" (fainted)
+    """
+    if not tok:
+        return None, None, None, False
+    s = tok.strip()
+    # Faint detection first
+    if 'fnt' in s:
         return 0, None, 0, True
-    if '/' in tok:
+
+    # Remove any trailing annotations (status, brackets info, etc.)
+    # Keep only the first whitespace-separated token which should be the HP form
+    first = s.split(' ', 1)[0]
+
+    # Now parse the HP form
+    if '/' in first:
+        cur, maximum = first.split('/', 1)
         try:
-            cur, maximum = tok.split('/', 1)
             cur_i = int(cur)
             max_i = int(maximum)
-            # Check if this is a percentage (like 71/100) vs absolute (like 298/420)
-            if max_i == 100:
-                # This is a percentage, calculate actual HP if we know maxhp
-                pct = cur_i
-                return None, None, pct, False  # Return percentage only
-            else:
-                # This is absolute HP
-                pct = int(round((cur_i / max_i) * 100)) if max_i else None
-                return cur_i, max_i, pct, False
-        except Exception:
+        except ValueError:
             return None, None, None, False
-    return None, None, None, False
+        # Percentage style like 75/100
+        if max_i == 100:
+            return None, None, cur_i, False  # return percentage only
+        # Absolute style like 182/319
+        pct = int(round((cur_i / max_i) * 100)) if max_i else None
+        return cur_i, max_i, pct, False
+    else:
+        # Single number without '/', treat as current HP if purely numeric (rare)
+        try:
+            cur_i = int(first)
+            # Without a max, we can't compute pct; leave unknown
+            return cur_i, None, None, False
+        except ValueError:
+            return None, None, None, False
 
 def _update_battle_state_from_line(line: str, battle: Dict[str, BattleSide]) -> Tuple[bool, bool]:
     """Update battle state from a battle line. Returns (changed, error_detected)."""
@@ -258,6 +288,9 @@ def _update_battle_state_from_line(line: str, battle: Dict[str, BattleSide]) -> 
         if side in battle and name:
             if battle[side].get('name') != name:
                 battle[side]['name'] = name
+                # Reset status on switch to avoid carrying over from previous Pokemon
+                if battle[side].get('status') is not None:
+                    battle[side]['status'] = None
                 # keep hp until we get a proper hp token; reset fainted
                 battle[side]['fainted'] = False
                 changed = True
@@ -600,6 +633,13 @@ def _process_output(out_lines, humanize: bool, active_side: str, requests: Dict[
     seen_messages = set()  # Track messages we've already added to avoid duplicates
     
     for line in out_lines:
+        # New turn: clear shown request IDs so AI/player can act again
+        # Some simulator requests omit or reuse rqid across turns; resetting here
+        # ensures we don't suppress valid actions on a new turn.
+        if '|turn|' in line:
+            shown_rqid['p1'] = None
+            shown_rqid['p2'] = None
+            debug_print("New turn detected; reset shown_rqid for both sides", "REQUESTS")
         # Check for player errors first to handle error recovery
         if '|error|' in line and ('Invalid choice' in line or 'Unavailable choice' in line):
             debug_print(f"Player error detected: {line.strip()}", "ERROR_RECOVERY")
@@ -713,6 +753,13 @@ def _parse_stream_lines(lines, requests: Dict[str, dict]) -> None:
             try:
                 payload = line.split('|request|', 1)[1]
                 req = json.loads(payload)
+                # Attach a monotonically increasing sequence number per side
+                try:
+                    _REQUEST_SEQ[current] = _REQUEST_SEQ.get(current, 0) + 1
+                except Exception:
+                    # Defensive fallback
+                    _REQUEST_SEQ[current] = 1
+                req['_seq'] = _REQUEST_SEQ[current]
                 requests[current] = req
                 debug_print(f"Parsed request for {current}: {list(req.keys())}", "REQUESTS")
             except (json.JSONDecodeError, IndexError) as e:
@@ -980,7 +1027,9 @@ def main():
     
     debug_print("Starting improved CLI battle interface", "MAIN")
     debug_print(f"Command line args parsed: {args}", "MAIN")
-
+   
+   
+    # Pack teams
     try:
         p1_team = pack_team(args.p1)
         p2_team = pack_team(args.p2)
@@ -1027,7 +1076,7 @@ def main():
     try:
         while True:
             # Wait for and process simulator output
-            out = sim.wait_for_output()
+            out = sim.wait_for_output(timeout=1.0)
             debug_print(f"Simulator output: {len(out) if out else 0} lines", "SIMULATOR")
             if out:
                 ai_loop_counter = 0  # Reset counter when we get simulator output
@@ -1049,6 +1098,25 @@ def main():
                     else:
                         print(f"\n{msg}")
                     return
+                
+                # Check for double KO scenario
+                p1_fainted = battle.get('p1', {}).get('fainted', False)
+                p2_fainted = battle.get('p2', {}).get('fainted', False)
+                if p1_fainted and p2_fainted:
+                    # This is a potential double KO. Check if the game is about to end or if players can switch.
+                    p1_req = requests.get('p1', {})
+                    p2_req = requests.get('p2', {})
+
+                    # Check if players have non-fainted pokemon to switch to
+                    p1_can_switch = any(not p.get('condition', '').endswith('fnt') for p in p1_req.get('side', {}).get('pokemon', []) if not p.get('active'))
+                    p2_can_switch = any(not p.get('condition', '').endswith('fnt') for p in p2_req.get('side', {}).get('pokemon', []) if not p.get('active'))
+
+                    # If both active pokemon are fainted and at least one player has no pokemon left, it's a loss/tie.
+                    if not p1_can_switch or not p2_can_switch:
+                         debug_print("Double KO detected, but one player has no remaining Pokemon. Game should end.", "MAIN")
+                    else:
+                        # Both players have fainted active pokemon but also have pokemon to switch to. This is the problematic state.
+                        raise Exception("Double KO detected: Both active Pokemon fainted simultaneously.")
                 
                 # If a player error was detected, force a short wait to get updated requests
                 if player_error_detected:
@@ -1082,7 +1150,16 @@ def main():
                                 print(note)
                             debug_print(f"Auto team preview sent for {side}: {default_order}", "PREVIEW")
                             continue  # Continue to process response immediately
-
+            else:
+                debug_print("No simulator output received", "SIMULATOR")
+                # Increment AI loop counter when no output is received
+                if args.p2_ai:
+                    ai_loop_counter += 1
+                    ai_error_count['p2'] += 1  # Increment error count as well
+                    debug_print(f"AI loop counter incremented to {ai_loop_counter}", "AI")
+                    if ai_loop_counter >= max_ai_loops:
+                        raise Exception("AI appears stuck in a loop without simulator response.")   
+                time.sleep(0.1)  # Prevent busy waiting
             # Handle AI for P2 - prioritize forced switches over wait requests
             if args.p2_ai:
                 ai_req = requests.get('p2')
@@ -1090,7 +1167,13 @@ def main():
                 if ai_req:
                     ai_rqid = ai_req.get('rqid')
                     if ai_rqid is None:
-                        ai_rqid = hash(str(ai_req.get('active')) + str(ai_req.get('forceSwitch')) + str(ai_req.get('wait')))
+                        # Use our per-side sequence to force progress even if rqid is missing/unchanged
+                        ai_rqid = hash(
+                            str(ai_req.get('_seq')) +
+                            '|' + str(ai_req.get('active')) +
+                            '|' + str(ai_req.get('forceSwitch')) +
+                            '|' + str(ai_req.get('wait'))
+                        )
                     debug_print(f"P2 AI request ID: {ai_rqid}, last shown: {shown_rqid.get('p2')}", "AI")
                     
                     # Special handling for forced switches - always process them even if request ID is the same
@@ -1131,8 +1214,8 @@ def main():
                                     debug_print("P2 AI: Sent forfeit due to no available Pokemon", "AI")
                                 shown_rqid['p2'] = ai_rqid
                                 break
-                        # Handle "wait": true requests (Pokemon can't move due to paralysis, flinch, etc.)
-                        elif ai_req.get('wait'):
+                        # Handle "wait": true or "cant": true requests (Pokemon can't move due to paralysis, flinch, etc.)
+                        elif ai_req.get('wait') or ai_req.get('cant'):
                             debug_print("P2 AI has wait request - Pokemon can't move", "AI")
                             note = f"[p2-ai] Pokemon can't move"
                             if ui and ui.enabled:
@@ -1211,7 +1294,7 @@ def main():
                 if player_req.get('wait'):
                     player_rqid = player_req.get('rqid')
                     if player_rqid is None:
-                        player_rqid = hash(str(player_req.get('wait')))
+                        player_rqid = hash(str(player_req.get('_seq')) + '|' + str(player_req.get('wait')))
                     
                     if shown_rqid.get(args.side) != player_rqid:
                         debug_print(f"Player {args.side} has wait request - Pokemon can't move", "WAIT")
@@ -1234,7 +1317,11 @@ def main():
                 elif player_req.get('active') or player_req.get('forceSwitch'):
                     player_rqid = player_req.get('rqid')
                     if player_rqid is None:
-                        player_rqid = hash(str(player_req.get('active')) + str(player_req.get('forceSwitch')))
+                        player_rqid = hash(
+                            str(player_req.get('_seq')) +
+                            '|' + str(player_req.get('active')) +
+                            '|' + str(player_req.get('forceSwitch'))
+                        )
                     
                     if shown_rqid.get(args.side) != player_rqid:
                         # Show Pokemon Showdown style menu and get choice
@@ -1285,6 +1372,7 @@ def main():
             debug_print("Simulator closed successfully", "MAIN")
         except Exception as e:
             debug_print(f"Error closing simulator: {e}", "MAIN_ERROR")
+
 
 if __name__ == "__main__":
     main()

@@ -1,11 +1,11 @@
-Garchomp @ Rocky Helmet  
-Ability: Rough Skin  
-EVs: 252 HP / 164 Def / 92 Spe  
-Impish Nature  
-- Earthquake  
-- Dragon Tail  
-- Stealth Rock  
-- Fire Blast  
+Klefki @ Leftovers
+Ability: Prankster
+EVs: 252 HP / 4 Def / 252 SpD
+Calm Nature
+- Thunder Wave
+- Spikes
+- Foul Play
+- Hypnosis
 
 Talonflame @ Sharp Beak  
 Ability: Gale Wings  

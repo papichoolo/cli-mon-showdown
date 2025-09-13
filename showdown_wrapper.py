@@ -116,3 +116,20 @@ class ShowdownWrapper:
             self.proc.terminate()
         except Exception:
             pass
+
+def generate_random_team(ps_path="pokemon-showdown", formatid="gen7randombattle"):
+    """Generates a random team for the given format."""
+    try:
+        result = subprocess.run(
+            ["node", f"{ps_path}/pokemon-showdown", "generate-team", formatid],
+            capture_output=True,
+            text=True,
+            check=True
+        )
+        return result.stdout.strip()
+    except subprocess.CalledProcessError as e:
+        debug_print(f"Error generating random team: {e.stderr}", "WRAPPER")
+        return None
+    except Exception as e:
+        debug_print(f"An unexpected error occurred while generating a team: {e}", "WRAPPER")
+        return None

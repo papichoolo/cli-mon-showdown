@@ -1043,13 +1043,11 @@ def main():
     battle_format = args.format
     if args.randbat:
         if args.format == 'gen7ou':  # If default format is unchanged, switch to random
-            if not hasattr(showdown_wrapper, "generate_random_team"):
-                raise RuntimeError("Your version of showdown_wrapper does not support random team generation. Please update the module.")
-            p1_team = showdown_wrapper.generate_random_team(formatid=battle_format)
-            p2_team = showdown_wrapper.generate_random_team(formatid=battle_format)
-            if not p1_team or not p2_team:
-                raise RuntimeError("Failed to generate random teams.")
-            debug_print(f"Random teams generated for format {battle_format}", "TEAMS")
+            battle_format = 'gen7randombattle'
+        debug_print(f"Random battle enabled. Using format: {battle_format}", "MAIN")
+   
+    # Pack teams or generate for randbat
+    try:
         if args.randbat:
             p1_team = showdown_wrapper.generate_random_team(formatid=battle_format)
             p2_team = showdown_wrapper.generate_random_team(formatid=battle_format)

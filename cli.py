@@ -1031,17 +1031,25 @@ def main():
 
     # Validate arguments
     if not args.randbat and (not args.p1 or not args.p2):
-        parser.error("p1 and p2 arguments are required unless --randbat is specified.")
+        parser.error(
+            "Error: p1 and p2 team file arguments are required unless --randbat is specified.\n"
+            "Example usage for random battles:\n"
+            "  python cli.py --randbat --format gen7randombattle\n"
+            "Or for custom teams:\n"
+            "  python cli.py path/to/p1.txt path/to/p2.txt"
+        )
 
     # Determine format for random battles
     battle_format = args.format
     if args.randbat:
         if args.format == 'gen7ou':  # If default format is unchanged, switch to random
-            battle_format = 'gen7randombattle'
-        debug_print(f"Random battle enabled. Using format: {battle_format}", "MAIN")
-   
-    # Pack teams or generate for randbat
-    try:
+            if not hasattr(showdown_wrapper, "generate_random_team"):
+                raise RuntimeError("Your version of showdown_wrapper does not support random team generation. Please update the module.")
+            p1_team = showdown_wrapper.generate_random_team(formatid=battle_format)
+            p2_team = showdown_wrapper.generate_random_team(formatid=battle_format)
+            if not p1_team or not p2_team:
+                raise RuntimeError("Failed to generate random teams.")
+            debug_print(f"Random teams generated for format {battle_format}", "TEAMS")
         if args.randbat:
             p1_team = showdown_wrapper.generate_random_team(formatid=battle_format)
             p2_team = showdown_wrapper.generate_random_team(formatid=battle_format)

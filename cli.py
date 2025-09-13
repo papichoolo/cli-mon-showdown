@@ -999,9 +999,10 @@ def _show_pokemon_showdown_menu(req: dict, battle: Dict[str, BattleSide], active
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("p1", help="Path to Player 1 team file (Showdown importable)")
-    parser.add_argument("p2", help="Path to Player 2 team file")
+    parser.add_argument("p1", nargs='?', default=None, help="Path to Player 1 team file (Showdown importable)")
+    parser.add_argument("p2", nargs='?', default=None, help="Path to Player 2 team file")
     parser.add_argument("--format", default="gen7ou")
+    parser.add_argument("--randbat", action="store_true", help="Enable random battles, generating teams automatically.")
     parser.add_argument("--no-auto-preview", action="store_true",
                         help="Do not auto-pick team preview; prompt for order")
     parser.add_argument("--side", choices=["p1", "p2"], default="p1",
@@ -1027,25 +1028,42 @@ def main():
     
     debug_print("Starting improved CLI battle interface", "MAIN")
     debug_print(f"Command line args parsed: {args}", "MAIN")
+
+    # Validate arguments
+    if not args.randbat and (not args.p1 or not args.p2):
+        parser.error("p1 and p2 arguments are required unless --randbat is specified.")
+
+    # Determine format for random battles
+    battle_format = args.format
+    if args.randbat:
+        if args.format == 'gen7ou':  # If default format is unchanged, switch to random
+            battle_format = 'gen7randombattle'
+        debug_print(f"Random battle enabled. Using format: {battle_format}", "MAIN")
    
-   
-    # Pack teams
+    # Pack teams or generate for randbat
     try:
-        p1_team = pack_team(args.p1)
-        p2_team = pack_team(args.p2)
-        debug_print(f"P1 team packed length: {len(p1_team)}, P2 team packed length: {len(p2_team)}", "TEAMS")
+        if args.randbat:
+            p1_team = showdown_wrapper.generate_random_team(formatid=battle_format)
+            p2_team = showdown_wrapper.generate_random_team(formatid=battle_format)
+            if not p1_team or not p2_team:
+                raise RuntimeError("Failed to generate random teams.")
+            debug_print(f"Random teams generated for format {battle_format}", "TEAMS")
+        else:
+            p1_team = pack_team(args.p1)
+            p2_team = pack_team(args.p2)
+            debug_print(f"P1 team packed length: {len(p1_team)}, P2 team packed length: {len(p2_team)}", "TEAMS")
     except RuntimeError as e:
         print(f"Error: {e}")
         print("Please check that Node.js is installed and team files are valid.")
         return
     except Exception as e:
-        print(f"Unexpected error packing teams: {e}")
-        debug_print(f"Unexpected team packing error: {e}", "TEAMS_ERROR")
+        print(f"Unexpected error preparing teams: {e}")
+        debug_print(f"Unexpected team preparation error: {e}", "TEAMS_ERROR")
         return
 
     debug_print("Initializing Pokemon Showdown simulator...", "SIMULATOR")
     try:
-        sim = ShowdownWrapper(formatid=args.format)
+        sim = ShowdownWrapper(formatid=battle_format)
         sim.send(f'>player p1 {{"name":"P1","team":"{p1_team}"}}')
         sim.send(f'>player p2 {{"name":"P2","team":"{p2_team}"}}')
         debug_print("Simulator initialized and teams sent", "SIMULATOR")

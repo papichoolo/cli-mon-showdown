@@ -1,4 +1,4 @@
-# CLI-Mon-Showdown
+# CLI-Mon Showdown
 
 A terminal-based Pokémon battle CLI that drives the official Pokémon Showdown simulator for accurate mechanics, quick testing, and lightweight play.
 

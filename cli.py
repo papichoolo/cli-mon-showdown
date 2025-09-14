@@ -1148,7 +1148,7 @@ def main():
     # Setup UI window
     ui = GameWindow(enabled=args.window and sys.stdout.isatty())
     ui.mount()
-    ui.add_feed("Battle started! Welcome to Pokemon Showdown CLI")
+    ui.add_feed("Battle started! Welcome to CLI-Mon Showdown!")
     ui.render(battle)
     humanize_mode = args.humanize
     debug_print("Entering main battle loop", "MAIN")

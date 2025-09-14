@@ -714,28 +714,83 @@ def _process_output(out_lines, humanize: bool, active_side: str, requests: Dict[
     # Return winner and whether a player error was detected
     return winner, player_error_detected
 
-def pack_team(path: str) -> str:
+def pack_team(path: str, formatname: str = "gen7ou", ps_path: str = "pokemon-showdown") -> str:
+    import os
+    
+    # First check if the team file exists
+    if not os.path.exists(path):
+        raise RuntimeError(f"Team file not found: {path}")
+    
     try:
-        result = subprocess.run(
-            ["node", "teamutils.js", path],
+        # Read the team file content
+        with open(path, 'r', encoding='utf-8') as f:
+            team_content = f.read()
+    except IOError as e:
+        debug_print(f"File read error for {path}: {e}", "TEAM_ERROR")
+        raise RuntimeError(f"Could not read team file {path}: {e}")
+    
+    try:
+        # First, pack the team using Pokemon Showdown
+        pack_result = subprocess.run(
+            ["node", f"{ps_path}/pokemon-showdown", "pack-team"],
+            input=team_content,
             capture_output=True,
             text=True,
             check=True,
-            timeout=30  # Add timeout to prevent hanging
+            timeout=30
         )
-        return result.stdout.strip()
+        packed_team = pack_result.stdout.strip()
+        
     except subprocess.TimeoutExpired as e:
         debug_print(f"Team packing timeout for {path}: {e}", "TEAM_ERROR")
         raise RuntimeError(f"Team packing timed out for {path}")
     except subprocess.CalledProcessError as e:
         debug_print(f"Team packing failed for {path}: {e.stderr}", "TEAM_ERROR")
         raise RuntimeError(f"Failed to pack team {path}: {e.stderr}")
-    except FileNotFoundError:
-        debug_print(f"Node.js or teamutils.js not found for {path}", "TEAM_ERROR")
-        raise RuntimeError("Node.js not found or teamutils.js missing")
-    except Exception as e:
-        debug_print(f"Unexpected team packing error for {path}: {e}", "TEAM_ERROR")
-        raise RuntimeError(f"Unexpected error packing team {path}: {e}")
+    except FileNotFoundError as e:
+        debug_print(f"Node.js or pokemon-showdown not found when packing {path}: {e}", "TEAM_ERROR")
+        raise RuntimeError("Node.js not found or pokemon-showdown directory missing")
+    
+    try:
+        # Then validate the team using the specified format
+        validate_result = subprocess.run(
+            ["node", f"{ps_path}/pokemon-showdown", "validate-team", formatname],
+            input=team_content,
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+        
+        # Check if there are validation errors
+        if validate_result.returncode != 0:
+            error_output = validate_result.stderr.strip()
+            if error_output:
+                # Display validation errors clearly
+                print(f"\n⚠️ Team validation errors for {path}:")
+                print(f"Format: {formatname}")
+                print("=" * 50)
+                print(error_output)
+                print("=" * 50)
+                raise RuntimeError(f"Team validation failed for {path} in format {formatname}:\n{error_output}")
+            else:
+                # If no stderr but non-zero exit code, there might be banned Pokemon/moves
+                print(f"\n⚠️ Team validation failed for {path} in format {formatname}")
+                print("The team may contain banned Pokemon, moves, or items for this format.")
+                raise RuntimeError(f"Team validation failed for {path} in format {formatname}")
+        
+    except subprocess.TimeoutExpired as e:
+        debug_print(f"Team validation timeout for {path}: {e}", "TEAM_ERROR")
+        raise RuntimeError(f"Team validation timed out for {path}")
+    except subprocess.CalledProcessError as e:
+        debug_print(f"Team validation failed for {path}: {e.stderr}", "TEAM_ERROR")
+        raise RuntimeError(f"Failed to validate team {path}: {e.stderr}")
+    except FileNotFoundError as e:
+        debug_print(f"Node.js or pokemon-showdown not found when validating {path}: {e}", "TEAM_ERROR")
+        raise RuntimeError("Node.js not found or pokemon-showdown directory missing")
+    
+    # If validation passed, return the packed team
+    debug_print(f"Team {path} packed and validated successfully for format {formatname}", "TEAM")
+    return packed_team
 
 def _parse_stream_lines(lines, requests: Dict[str, dict]) -> None:
     """Update requests dict from simulator stream output."""
@@ -1055,8 +1110,9 @@ def main():
                 raise RuntimeError("Failed to generate random teams.")
             debug_print(f"Random teams generated for format {battle_format}", "TEAMS")
         else:
-            p1_team = pack_team(args.p1)
-            p2_team = pack_team(args.p2)
+            print(f"Packing and validating teams... for {battle_format}")
+            p1_team = pack_team(args.p1, battle_format)
+            p2_team = pack_team(args.p2, battle_format)
             debug_print(f"P1 team packed length: {len(p1_team)}, P2 team packed length: {len(p2_team)}", "TEAMS")
     except RuntimeError as e:
         print(f"Error: {e}")

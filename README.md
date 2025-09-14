@@ -1,91 +1,118 @@
-# CLI Pokémon Showdown
+# CLI-Mon Showdown
 
-A command-line Pokémon battle simulator that integrates with Pokémon Showdown's simulator engine for accurate battle mechanics, team building, and competitive play.
+A terminal-based Pokémon battle CLI that drives the official Pokémon Showdown simulator for accurate mechanics, quick testing, and lightweight play.
 
-**Note:Pokemon Showndown is required for the CLI to work so dont forget to clone https://github.com/smogon/pokemon-showdown.git**
- 
+Note: You need a local clone of Pokémon Showdown. This repo expects it at `pokemon-showdown/` in the project root.
+
 ## Features
 
-- **Pokémon Showdown Integration**: Uses the official Pokémon Showdown simulator for accurate battle mechanics
-- **Team Building**: Import and export teams in Showdown format
-- **Command-Line Interface**: Clean, streamlined CLI experience for battles
-- **Team Utilities**: JavaScript utilities for team parsing and validation using @pkmn libraries
-- **Automated Battles**: Support for automated battle scenarios and testing
+- Accurate engine: uses the official Pokémon Showdown simulator
+- Teams: load Showdown import/export text files
+- CLI-first: fast feedback loop and readable battle feed
+- Random battles: generate teams via Showdown
 
 ## Project Structure
 
+- `cli.py` – main CLI battle runner
+- `showdown_wrapper.py` – thin wrapper around the Showdown Node process
+- `teams/` – example team files in Showdown format
+- `BATTLE_FIXES.md` – notes on battle handling improvements
 
-- `cli.py` — CLI battle simulator
-- `showdown_wrapper.py` — Python wrapper for Pokémon Showdown simulator
-- `teamutils.js` — Team parsing and utilities using @pkmn libraries
-- `teams/` — Sample team files in Showdown format
-- `BATTLE_FIXES.md` — Documentation of battle system improvements
+## Requirements
 
+- Python 3.8+
+- Node.js 16+
+- A local checkout of `smogon/pokemon-showdown`
 
-## CLI Flags
+## Quick Start
 
-| Flag | Description |
-| ---- | ----------- |
-| `p1` | Path to Player 1’s team file in Showdown export format (required). |
-| `p2` | Path to Player 2’s team file (required). |
-| `--format FORMAT` | Pokémon Showdown battle format ID (default: `gen7ou`). |
-| `--no-auto-preview` | Disable automatic team preview ordering; prompt for manual order. |
-| `--side {p1,p2}` | Side controlled via unprefixed commands in the CLI (default: `p1`). |
-| `--p2-ai` / `--no-p2-ai` | Enable (default) or disable random move selection for Player 2. |
-| `--humanize` / `--raw` | Show human‑friendly event summaries (default) or raw Showdown log lines. |
-| `--window` / `--no-window` | Render the in-terminal game window (default) or show plain text output. |
-|`--debug`| Enables Debugging Mode|
+PowerShell (Windows):
 
-
-## Prerequisites
-
-- **Python 3.7+**
-- **Node.js 14+**
-- **Pokémon Showdown** (cloned separately)
-
-## Setup Instructions
-
-1. **Clone the repository**
-   ```powershell
-   git clone https://github.com/papichoolo/cli-mon-showdown.git
-   cd cli-mon-showdown
-   ```
-
-2. **Install Python dependencies**
-   ```powershell
-   python -m venv .venv
-   .venv\Scripts\activate
-   pip install -r requirements.txt
-   ```
-
-3. **Install Node.js dependencies**
-   ```powershell
-   npm install
-   ```
-
-4. **Clone Pokémon Showdown**
-   ```powershell
-   git clone https://github.com/smogon/pokemon-showdown.git
-   cd pokemon-showdown
-   npm install
-   cd ..
-   ```
-
-## How to Run
-
-### Basic Battle Simulation
 ```powershell
-python cli.py teams/p1.txt teams/p2.txt
+git clone https://github.com/papichoolo/cli-mon-showdown.git
+cd cli-mon-showdown
+
+# Optional: create a virtualenv (no external Python deps required)
+python -m venv .venv
+.venv\Scripts\activate
+
+# Get Pokémon Showdown inside this project
+git clone https://github.com/smogon/pokemon-showdown.git
+cd pokemon-showdown
+npm ci
+cd ..
+
+# Run a battle with sample teams
+python cli.py teams/p1.txt teams/p2.txt --format gen7ou
 ```
 
-### Team Utilities
-```powershell
-node teamutils.js teams/p1.txt
+Bash (macOS/Linux):
+
+```bash
+git clone https://github.com/papichoolo/cli-mon-showdown.git
+cd cli-mon-showdown
+
+python3 -m venv .venv
+source .venv/bin/activate
+
+git clone https://github.com/smogon/pokemon-showdown.git
+cd pokemon-showdown && npm ci && cd ..
+
+python3 cli.py teams/p1.txt teams/p2.txt --format gen7ou
 ```
 
-## Team Format
+## Setup Details
 
-Teams should be in Pokémon Showdown's importable format. Example:
+- Python: this project uses only the standard library; `requirements.txt` is intentionally empty.
+- Node: used to run the Showdown simulator and its CLI utilities (`simulate-battle`, `pack-team`, `validate-team`, `generate-team`).
+- Showdown path: by default the code looks for `pokemon-showdown/pokemon-showdown`. Keep the folder at the project root or adjust the code if you move it.
+
+## CLI Usage
+
+Basic:
+
+```powershell
+python cli.py <p1_team> <p2_team> [--format FORMAT] [flags]
+```
+
+Random battle (no team files required):
+
+```powershell
+python cli.py --randbat --format gen7randombattle
+```
+
+### Flags
+
+- p1: path to Player 1 team file (Showdown importable).
+- p2: path to Player 2 team file.
+- --format FORMAT: Showdown format id. Default: gen7ou. Examples: gen7ou, gen9ou, gen7randombattle.
+- --randbat: generate random teams for both players (ignores p1/p2 positional args).
+- --no-auto-preview: disable automatic team preview ordering; you’ll be prompted to choose.
+- --side {p1|p2}: which side unprefixed commands control. Default: p1.
+- --p2-ai / --no-p2-ai: enable/disable simple random-choice AI for Player 2. Default: enabled.
+- --humanize / --raw: show a summarized human-readable feed (default) or raw Showdown log lines.
+- --window / --no-window: render a minimal in-terminal game window (default) or print plain text only.
+- --debug: print additional debug information.
+
+Examples:
+
+```powershell
+# Gen 7 OU with built teams
+python cli.py teams/p1.txt teams/p2.txt --format gen7ou
+
+# Random battle using Showdown’s generator
+python cli.py --randbat --format gen7randombattle
+
+# Control p2 manually and show raw stream
+python cli.py teams/p1.txt teams/p2.txt --side p2 --no-p2-ai --raw
+
+# Disable the windowed UI and team auto-preview
+python cli.py teams/p1.txt teams/p2.txt --no-window --no-auto-preview
+```
+
+## Teams
+
+Team files should be in Pokémon Showdown’s import/export text format, for example:
 
 ```
 Charizard @ Life Orb
@@ -98,22 +125,16 @@ Timid Nature
 - Hidden Power Ice
 ```
 
-## Dependencies
+When you run the CLI, your teams are packed and validated via Showdown’s CLI (`pack-team` and `validate-team`). If validation fails, the error output from Showdown is shown.
 
-### Python
-- Core Python libraries for CLI and battle logic
+## Troubleshooting
 
-### Node.js
-- `@pkmn/dex` - Pokémon data and utilities
-- `@pkmn/sets` - Team parsing and validation
-- `@pkmn/sim` - Simulator integration
-
-## Important Notes
-
-- **Pokémon Showdown folder is NOT included** in this repository. Clone it separately as shown in setup instructions.
-- Team files in `teams/` directory are examples - create your own or use Showdown's team builder.
-- The simulator requires the Pokémon Showdown engine to be properly installed and accessible.
+- “node: not found” or “file not found”: ensure Node.js is installed and `node` is on your PATH.
+- Pokémon Showdown not found: confirm the folder exists at `pokemon-showdown/` and run `npm ci` inside it.
+- Validation errors: check that your team is legal in the chosen `--format`.
+- Terminal window not rendering: some terminals may not support the UI; try `--no-window`.
 
 ---
 
-Created by papichoolo. Uses Pokémon Showdown's simulator engine and @pkmn libraries.
+Created by papichoolo. Uses the official Pokémon Showdown simulator.
+

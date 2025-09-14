@@ -1,6 +1,6 @@
 Garchomp (M) @ Rocky Helmet
 Ability: Rough Skin
-Level: 50
+Level: 100
 EVs: 252 HP / 252 Atk / 4 SpA
 Adamant Nature
 - Earthquake
@@ -10,7 +10,7 @@ Adamant Nature
 
 Talonflame (F) @ Sharp Beak
 Ability: Gale Wings
-Level: 50
+Level: 100
 EVs: 252 HP / 252 Atk / 4 SpA
 Adamant Nature
 - Brave Bird
@@ -20,7 +20,7 @@ Adamant Nature
 
 Azumarill (F) @ Assault Vest
 Ability: Huge Power
-Level: 50
+Level: 100
 EVs: 252 HP / 252 Atk / 4 SpA
 Adamant Nature
 - Aqua Jet
@@ -30,7 +30,7 @@ Adamant Nature
 
 Rotom-Wash @ Sitrus Berry
 Ability: Levitate
-Level: 50
+Level: 100
 EVs: 252 HP / 252 SpA / 4 SpD
 Modest Nature
 - Hydro Pump
@@ -40,7 +40,7 @@ Modest Nature
 
 Scizor-Mega (F) @ Scizorite
 Ability: Technician
-Level: 50
+Level: 100
 EVs: 252 HP / 252 Atk / 4 SpD
 Adamant Nature
 - Bullet Punch
@@ -50,7 +50,7 @@ Adamant Nature
 
 Keldeo @ Choice Specs
 Ability: Justified
-Level: 50
+Level: 100
 EVs: 252 HP / 252 SpA / 4 SpD
 Modest Nature
 - Scald

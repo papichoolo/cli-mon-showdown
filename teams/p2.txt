@@ -1,11 +1,8 @@
-Charizard-Mega-X @ Charizardite X  
-Ability: Tough Claws  
+Hatterene @ Leftovers  
+Ability: Magic Bounce  
 EVs: 252 Atk / 4 Def / 252 Spe  
 Adamant Nature  
-- Dragon Dance  
-- Flare Blitz  
-- Dragon Claw  
-- Roost  
+- Psyshock  
 
 Greninja @ Life Orb  
 Ability: Protean  
@@ -16,39 +13,43 @@ Naive Nature
 - Gunk Shot  
 - U-turn  
 
-Landorus-Therian @ Choice Scarf  
-Ability: Intimidate  
-EVs: 252 Atk / 4 Def / 252 Spe  
-Jolly Nature  
-- Earthquake  
-- Stone Edge  
+Raging Bolt @ Life Orb  
+Ability: Protosynthesis  
+Tera Type: Ghost  
+EVs: 36 Def / 252 SpA / 220 Spe  
+Modest Nature  
+IVs: 20 Atk  
+- Thunderclap  
+- Weather Ball  
+- Dragon Pulse  
+- Solar Beam  
+
+Slither Wing @ Assault Vest  
+Ability: Protosynthesis  
+Tera Type: Fire  
+EVs: 40 HP / 252 Atk / 216 Spe  
+Adamant Nature  
 - U-turn  
-- Knock Off  
-
-Ferrothorn @ Leftovers  
-Ability: Iron Barbs  
-EVs: 252 HP / 88 Def / 168 SpD  
-Relaxed Nature  
-IVs: 0 Spe  
-- Stealth Rock  
-- Leech Seed  
-- Gyro Ball  
-- Power Whip  
-
-Latios @ Choice Specs  
-Ability: Levitate  
-EVs: 4 Def / 252 SpA / 252 Spe  
-Timid Nature  
-- Draco Meteor  
-- Psyshock  
-- Hidden Power Fire  
-- Trick  
-
-Excadrill @ Focus Sash  
-Ability: Mold Breaker  
-EVs: 252 Atk / 4 SpD / 252 Spe  
-Jolly Nature  
+- First Impression  
 - Earthquake  
-- Iron Head  
-- Rapid Spin  
-- Stealth Rock  
+- Temper Flare  
+
+Venusaur @ Life Orb  
+Ability: Chlorophyll  
+Tera Type: Fire  
+EVs: 4 Atk / 252 SpA / 252 Spe  
+Naive Nature  
+- Growth  
+- Giga Drain  
+- Weather Ball  
+- Earthquake  
+
+Walking Wake @ Wise Glasses  
+Ability: Protosynthesis  
+Tera Type: Fairy  
+EVs: 12 HP / 244 SpA / 252 Spe  
+Timid Nature  
+- Hydro Steam  
+- Weather Ball  
+- Draco Meteor  
+- Flip Turn  

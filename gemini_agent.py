@@ -8,14 +8,21 @@ Pokemon battle decisions based on game state observations.
 import json
 import os
 from typing import Dict, Optional, Tuple, Any
-import google.generativeai as genai
+from google import genai
+from pydantic import BaseModel, Field
 from google.generativeai.types import HarmCategory, HarmBlockThreshold
+from google.genai import types
+
+class ModelAction(BaseModel):
+    action_type: str = Field(..., description="Either 'move' or 'switch'")
+    choice: int = Field(..., description="Index of the move (1-4) or Pokemon slot (1-6)")
+    reasoning: Optional[str] = Field(None, description="Brief explanation of the choice")
 
 
 class GeminiPokemonAgent:
     """Pokemon battle agent powered by Google's Gemini API."""
     
-    def __init__(self, api_key: Optional[str] = None, model_name: str = "gemini-1.5-flash"):
+    def __init__(self, api_key: Optional[str] = None, model_name: str = "gemini-2.5-flash"):
         """
         Initialize the Gemini Pokemon agent.
         
@@ -31,28 +38,32 @@ class GeminiPokemonAgent:
                 "or pass api_key parameter to GeminiPokemonAgent()"
             )
         
-        # Configure Gemini
-        genai.configure(api_key=self.api_key)
+        # # Configure Gemini
+        # genai.configure(api_key=self.api_key)
+        # self.model_name = model_name
+        
+        # # Initialize the model with safety settings
+        # self.model = genai.GenerativeModel(
+        #     model_name=model_name,
+        #     safety_settings={
+        #         HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
+        #         HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
+        #         HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
+        #         HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
+        #     }
+        # )
+        
+        # # Generation config for consistent responses
+        # self.generation_config = genai.types.GenerationConfig(
+        #     temperature=0.7,
+        #     top_p=0.8,
+        #     top_k=40,
+        #     max_output_tokens=500,
+        # )
+        self.client = genai.Client(api_key=self.api_key)
         self.model_name = model_name
-        
-        # Initialize the model with safety settings
-        self.model = genai.GenerativeModel(
-            model_name=model_name,
-            safety_settings={
-                HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
-                HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
-                HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
-                HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
-            }
-        )
-        
-        # Generation config for consistent responses
-        self.generation_config = genai.types.GenerationConfig(
-            temperature=0.7,
-            top_p=0.8,
-            top_k=40,
-            max_output_tokens=500,
-        )
+
+
     
     def create_battle_prompt(self, observation: dict, team_knowledge: Optional[dict] = None) -> str:
         """
@@ -68,21 +79,7 @@ class GeminiPokemonAgent:
         prompt_parts = []
         
         # System prompt
-        prompt_parts.append("""You are an expert Pokemon battle strategist. Analyze the current battle state and choose the best action.
-
-IMPORTANT: You must respond with ONLY a valid JSON object in this exact format:
-{
-    "action_type": "move" or "switch",
-    "choice": <number>,
-    "reasoning": "<brief explanation>"
-}
-
-Where:
-- action_type: Either "move" to use a move or "switch" to switch Pokemon
-- choice: The index number of the move (1-4) or Pokemon slot (1-6) to use
-- reasoning: A brief strategic explanation (max 50 words)
-
-Do not include any other text or formatting. Only the JSON object.""")
+        prompt_parts.append("""""")
         
         # Current turn and battle state
         prompt_parts.append(f"\n--- BATTLE STATE (Turn {observation.get('turn', '?')}) ---")
@@ -198,11 +195,30 @@ Remember: Respond with ONLY the JSON object, no other text!""")
             prompt = self.create_battle_prompt(observation, team_knowledge)
             #print(prompt)
             # Generate response from Gemini
-            response = self.model.generate_content(
-                prompt,
-                generation_config=self.generation_config
+            response = self.client.models.generate_content(
+                model=self.model_name,
+                config=types.GenerateContentConfig(
+                    system_instruction="""You are an expert Pokemon battle strategist. Analyze the current battle state and choose the best action.
+                    IMPORTANT: You must respond with ONLY a valid JSON object in this exact format:
+                    {
+                        "action_type": "move" or "switch",
+                        "choice": <number>,
+                        "reasoning": "<brief explanation>"
+                    }
+                    Where:
+                    - action_type: Either "move" to use a move or "switch" to switch Pokemon
+                    - choice: The index number of the move (1-4) or Pokemon slot (1-6) to use
+                    - reasoning: A brief strategic explanation (max 50 words)
+                    Do not include any other text or formatting. Only the JSON object.""",
+    
+                    temperature=0.7,
+response_mime_type="application/json",
+response_schema=ModelAction,
+thinking_config=types.ThinkingConfig(
+thinking_budget=-1)
+            ),
+            contents=prompt
             )
-            
             # Parse the response
             if response.text:
                 return self.parse_llm_response(response.text, observation)
@@ -335,7 +351,7 @@ Remember: Respond with ONLY the JSON object, no other text!""")
 # Global agent instance
 _agent_instance = None
 
-def init_gemini_agent(api_key: Optional[str] = None, model_name: str = "gemini-1.5-flash") -> GeminiPokemonAgent:
+def init_gemini_agent(api_key: Optional[str] = None, model_name: str = "gemini-2.5-flash-lite") -> GeminiPokemonAgent:
     """
     Initialize the global Gemini agent instance.
     

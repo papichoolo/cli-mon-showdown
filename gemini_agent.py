@@ -125,6 +125,7 @@ class GeminiPokemonAgent:
                 prompt_parts.append("\nChoose the best Pokemon to switch to using 'action_type': 'switch' and the Pokemon's index number.")
             return '\n'.join(prompt_parts)
         
+        
         # Available moves
         moves = observation.get('available_moves', [])
         if moves:
@@ -146,10 +147,10 @@ class GeminiPokemonAgent:
         recent_events = observation.get('recent_events', [])
         if recent_events:
             prompt_parts.append("\nRecent Events:")
-            for event in recent_events[-5:]:  # Last 5 events
+            for event in recent_events[-10:]:  # Last 5 events
                 prompt_parts.append(f"  • {event}")
         
-        # Field conditions
+        #TODO: Field Conditions not being fetched appropriately, try to fetch from 
         weather = observation.get('weather')
         if weather:
             prompt_parts.append(f"\nWeather: {weather}")
@@ -158,24 +159,155 @@ class GeminiPokemonAgent:
         if side_conditions:
             prompt_parts.append(f"Our Side Conditions: {list(side_conditions.keys())}")
         
-        # Team knowledge if available
-        if team_knowledge and team_knowledge.get('pokemon'):
-            prompt_parts.append(f"\nOur Team Composition:")
-            for i, pokemon in enumerate(team_knowledge['pokemon'][:6], 1):
-                moves_list = ', '.join(pokemon.get('moves', [])[:4])
-                prompt_parts.append(f"  {i}. {pokemon['name']} - {moves_list}")
+        # Team knowledge - showing only available (alive) Pokemon
+        if observation.get('available_switches'):
+            prompt_parts.append(f"\nOur Available Pokemon:")
+            
+            for switch in observation['available_switches']:
+                index = switch.get('index', '?')
+                species = switch.get('species', 'Unknown')
+                hp_status = switch.get('hp_status', 'Unknown HP')
+                
+                # Basic information
+                prompt_parts.append(f"  {index}. {species} - HP: {hp_status}")
+                
+                # Add additional information from team_knowledge if available
+                if team_knowledge and team_knowledge.get('pokemon'):
+                    for pokemon in team_knowledge['pokemon']:
+                        if pokemon.get('name') == species or pokemon.get('species') == species:
+                            # Add moves if available
+                            if pokemon.get('moves'):
+                                moves_list = ', '.join(pokemon['moves'][:4])
+                                prompt_parts.append(f"     Moves: {moves_list}")
+                            
+                            # Add ability if available
+                            if pokemon.get('ability'):
+                                prompt_parts.append(f"     Ability: {pokemon['ability']}")
+                                
+                            # Add item if available
+                            if pokemon.get('item'):
+                                prompt_parts.append(f"     Item: {pokemon['item']}")
+                            
+                            break
         
         # Strategic instructions
         prompt_parts.append("""
---- STRATEGIC GUIDELINES ---
-1. If opponent is low HP, prioritize attacking moves
-2. If our Pokemon is low HP or has bad status, consider switching
-3. Use type advantages when possible
-4. Conserve PP on powerful moves
-5. Consider weather and field effects
-6. Switch to counter opponent's type if needed
-
-Remember: Respond with ONLY the JSON object, no other text!""")
+"turn_budgeting": {
+"early_game": "scout sets, establish hazards/positioning",
+"mid_game": "chip key checks, force trades, deny removal",
+"end_game": "enable cleaner/wincon, preserve necessary sacks"
+}
+},
+"core_principles": [
+"Identify win conditions on preview and after each reveal",
+"Play to highest EV of the game state; avoid low-reward overpredictions early",
+"Preserve team roles: wall, pivot, breaker, cleaner, hazard control",
+"Trade HP for progress only when it advances a wincon or removes a hard check",
+"Track information relentlessly; update lines when new info appears"
+],
+"priority_order": [
+"Prevent immediate KOs and checkmates",
+"Secure KOs or decisive chip on opposing wincon",
+"Deny hazard removal or set hazards when uncontested",
+"Capitalize on free turns with setup, pivot, or double switch",
+"Conserve key resources (HP, PP, Tera, items) for endgame"
+],
+"attacking_rules": [
+"Use the strongest reliable move that secures a KO or 2HKO without overexposing",
+"Respect resist/immunity abilities (Flash Fire, Storm Drain, Volt Absorb, Sap Sipper)",
+"Prefer guaranteed damage over reads when ahead; predict when behind or at parity with clear payoff",
+"Avoid contact into Rocky Helmet/Rough Skin/Iron Barbs when chip would flip ranges",
+"Exploit chip thresholds: Stealth Rock + Spikes + Leftovers denial to push into KO range"
+],
+"switching_rules": [
+"Switch when current mon cannot 2HKO and is 2HKO’d back or risks crippling status",
+"Use pivots (U-turn/Volt Switch/Flip Turn/Teleport) to seize momentum into breakers",
+"Double switch to catch obvious answers once they’re constrained",
+"Preserve defensive glue vs opposing breakers; do not sack your only check"
+],
+"type_matchups": [
+"Always prefer STAB super-effective over neutral unless accuracy/priority/coverage dictates",
+"Do not Tera into a type that opens new 4x weaknesses unless it immediately flips the game",
+"Punish locked Choice users by switching into resists/immunities and gaining tempo"
+],
+"pp_management": [
+"Stall low-PP threats (Hydro Steam, Make It Rain, Overheat, Moonblast on key walls) when safe",
+"Avoid spamming low-PP nukes unless it converts into board control or a KO",
+"Use Recover/Slack Off/Strength Sap intelligently; never heal into a free setup"
+],
+"hazards": [
+"Set Stealth Rock early if safe; add Spikes/Tspikes when removal is pressured or blocked",
+"Spin/Defog only when hazard state meaningfully alters ranges or protects wincon",
+"Block removal with Ghost into Spin, pressure Defoggers with breakers/status",
+"Leverage Heavy-Duty Boots knowledge; punish non-Boots pivots with chip cycles"
+],
+"status_and_items": [
+"Spread status to disable walls/cleaners; prioritize Toxic on bulky pivots, Para on fast threats, Burn on physicals",
+"Do not status Guts/Toxic Boost/Poison Heal or Synchronize without payoff",
+"Scout items via damage rolls, recovery (Leftovers/Black Sludge), and speed ties (Choice Scarf inference)",
+"Knock Off high-value targets early; preserve your Boots on hazard-weak mons"
+],
+"weather_terrain_screens": [
+"Count turns for weather/terrain/screens; plan sacks and pivots to waste turns",
+"Deny setters when possible; pressure abusers during downtime",
+"Against screens HO, prioritize chip + phazing/taunt; keep hazards up"
+],
+"setup_and_priority": [
+"Set up only on forced switches or neutered targets; ensure answers are removed or crippled",
+"Use priority to revenge kill or force Tera; avoid revealing priority unnecessarily if the surprise secures endgame",
+"Phaze or Encore opposing setup if checks are strained"
+],
+"terastalization": [
+"Do not Tera without a concrete tactical or strategic gain (KO, walling a threat, enabling sweep)",
+"Track opposing likely Tera types from team structure; respect defensive Tera to block KOs",
+"Save Tera for the mon most aligned with your wincon unless an emergency defense is required"
+],
+"prediction_policy": [
+"Default to safe lines until enough info is gathered; minimize coin flips early",
+"Take calculated reads when payoff is high and downside is limited by sacks or hazards",
+"Use prior reveals and common sets to weight options; update as calcs contradict expectations"
+],
+"risk_management": [
+"Avoid status into Natural Cure/Rest or Flame Body unless payoff > risk",
+"Respect lure coverage (e.g., Fire Blast Garchomp, Ice Beam Slowking-Galar) after telltale sequences",
+"Account for crit risk when behind a sub or versus boosted foes; choose lines that keep outs"
+],
+"information_tracking": {
+"track": [
+"HP percentages and exact damage rolls",
+"Revealed moves, items, abilities, Tera types",
+"Speed tiers from in-battle order and tie outcomes",
+"Hazard state and removal resources",
+"Field turn counters (weather/terrain/screens/room)"
+],
+"update_frequency": "after every action; recalc KO ranges post-chip"
+},
+"endgame": [
+"Identify cleaner candidates (Scarfers, Dragon Dancers, Booster Energy, priority users)",
+"Preserve sacks to generate safe entries for cleaner",
+"Force 50/50s only when winning both branches or when losing otherwise"
+],
+"edge_cases": [
+"Versus Trick/Encore: do not give free locks; pivot to low-opportunity-cost mons",
+"Versus Substitute: break sub first unless you can phaze or outpace",
+"Versus Unaware: prioritize raw power, hazards, and status over boosting",
+"Versus Stall: stack hazards, deny recovery with Taunt/Knock, and manage PP",
+"Versus HO: trade aggressively, keep hazards, deny setup with priority/Encore/phazing"
+],
+"execution_rules": [
+"Always output a legal move or switch; include a brief reason if required by interface",
+"If no safe option exists, choose the line that maximizes outs and preserves wincon odds",
+"On timers, prefer deterministic safe lines over deep calcs"
+],
+"original_guidelines_integrated": [
+"If opponent is low HP, prioritize attacking moves",
+"If our Pokemon is low HP or has bad status, consider switching",
+"Use type advantages when possible",
+"Conserve PP on powerful moves",
+"Consider weather and field effects",
+"Switch to counter opponent's type if needed"
+]
+}""")
         
         return '\n'.join(prompt_parts)
     
@@ -219,6 +351,7 @@ thinking_budget=-1)
             ),
             contents=prompt
             )
+            #print(prompt)
             # Parse the response
             if response.text:
                 return self.parse_llm_response(response.text, observation)

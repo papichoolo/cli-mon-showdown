@@ -1612,8 +1612,42 @@ def main():
                     if not p1_can_switch or not p2_can_switch:
                          debug_print("Double KO detected, but one player has no remaining Pokemon. Game should end.", "MAIN")
                     else:
+                        if p1_can_switch and p2_can_switch:
+                            # Both sides have replacement options after a double KO.
+                            # Proactively handle the human side's forced switch here so the AI
+                            # can also choose in the same iteration below.
+                            try:
+                                human_side = args.side
+                                human_req = requests.get(human_side)
+                                # Only act if we actually have a forceSwitch-style request
+                                if human_req and (human_req.get('forceSwitch') or [False])[0]:
+                                    # Compute a stable rqid like in the normal handling path
+                                    player_rqid = human_req.get('rqid')
+                                    if player_rqid is None:
+                                        player_rqid = hash(
+                                            str(human_req.get('_seq')) +
+                                            '|' + str(human_req.get('active')) +
+                                            '|' + str(human_req.get('forceSwitch'))
+                                        )
+                                    if shown_rqid.get(human_side) != player_rqid:
+                                        # Prompt and send the human switch immediately
+                                        choice = _show_pokemon_showdown_menu(human_req, battle, human_side, ui)
+                                        sim.send(f">{human_side} {choice}")
+                                        note = f"[sent] {human_side} {choice}"
+                                        if ui and ui.enabled:
+                                            ui.add_feed(note)
+                                            ui.render(battle)
+                                        else:
+                                            print(f"\n{note}")
+                                        shown_rqid[human_side] = player_rqid
+                            except (KeyboardInterrupt, EOFError):
+                                print("\n\nBattle interrupted by user during switch selection")
+                                return
+                            except Exception as e:
+                                debug_print(f"Error handling double-KO switch prompt: {e}", "MAIN")
+
                         # Both players have fainted active pokemon but also have pokemon to switch to. This is the problematic state.
-                        raise Exception("Double KO detected: Both active Pokemon fainted simultaneously.")
+                        #raise Exception("Double KO detected: Both active Pokemon fainted simultaneously.")
                 
                 # If a player error was detected, force a short wait to get updated requests
                 if player_error_detected:

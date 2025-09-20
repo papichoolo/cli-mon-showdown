@@ -1,0 +1,55 @@
+Tyranitar @ Choice Band
+Ability: Sand Stream
+EVs: 252 Atk / 4 Def / 252 Spe
+Adamant Nature
+- Crunch
+- Stone Edge
+- Pursuit
+- Earthquake
+
+Landorus-Therian @ Rocky Helmet
+Ability: Intimidate
+EVs: 248 HP / 216 Def / 44 Spe
+Impish Nature
+- Earthquake
+- U-turn
+- Hidden Power [Ice]
+- Stealth Rock
+
+Tapu Lele @ Choice Scarf
+Ability: Psychic Surge
+EVs: 4 Def / 252 SpA / 252 Spe
+Timid Nature
+- Psychic
+- Moonblast
+- Focus Blast
+- Hidden Power [Fire]
+
+Ferrothorn @ Leftovers
+Ability: Iron Barbs
+EVs: 252 HP / 88 Def / 168 SpD
+Relaxed Nature
+IVs: 0 Spe
+- Stealth Rock
+- Leech Seed
+- Power Whip
+- Gyro Ball
+
+Heatran @ Leftovers
+Ability: Flash Fire
+EVs: 248 HP / 8 SpA / 252 SpD
+Calm Nature
+- Magma Storm
+- Toxic
+- Taunt
+- Earth Power
+
+Greninja @ Life Orb
+Ability: Protean
+EVs: 4 Def / 252 SpA / 252 Spe
+Timid Nature
+- Hydro Pump
+- Ice Beam
+- Dark Pulse
+- Spikes
+

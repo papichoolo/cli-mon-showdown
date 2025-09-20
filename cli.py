@@ -9,6 +9,13 @@ from typing import Dict, Optional, Tuple, List
 import showdown_wrapper
 from showdown_wrapper import ShowdownWrapper
 
+# Import Gemini agent (optional, will fallback if not available)
+try:
+    from gemini_agent import get_gemini_decision, init_gemini_agent
+    GEMINI_AVAILABLE = True
+except ImportError:
+    GEMINI_AVAILABLE = False
+
 def debug_print(msg: str, prefix: str = "DEBUG"):
     """Print debug messages if debugging is enabled"""
     if showdown_wrapper.DEBUG:
@@ -30,7 +37,7 @@ class GameWindow:
         self.enabled = enabled and sys.stdout.isatty()
         size = shutil.get_terminal_size(fallback=(80, 24))
         self.width = max(60, min(120, size.columns))
-        self.feed_lines = max(10, min(15, feed_lines))
+        self.feed_lines = max(15, min(25, feed_lines))  # Increased from 15 to 25 max lines
         self.feed: List[str] = []
         self.mounted = False
         self.last_render = ""  # Cache last render to avoid unnecessary redraws
@@ -80,11 +87,44 @@ class GameWindow:
         msg = msg.replace('\n', ' ').strip()
         if not msg:  # Skip empty messages
             return
-        if len(msg) > self.width - 4:
-            msg = msg[: self.width - 7] + '...'
-        # Avoid duplicates by checking recent messages
-        if msg not in self.feed[-5:]:  # Check last 5 messages for duplicates
-            self.feed.append(msg)
+        
+        # Wrap long messages instead of truncating
+        max_line_length = self.width - 4  # Account for border characters
+        if len(msg) > max_line_length:
+            # Split message into wrapped lines
+            words = msg.split(' ')
+            lines = []
+            current_line = ""
+            
+            for word in words:
+                # If adding this word would exceed the line length
+                if len(current_line) + len(word) + 1 > max_line_length:
+                    if current_line:  # If we have content in current line
+                        lines.append(current_line)
+                        current_line = word
+                    else:  # Single word is too long, truncate it
+                        lines.append(word[:max_line_length - 3] + '...')
+                        current_line = ""
+                else:
+                    if current_line:
+                        current_line += " " + word
+                    else:
+                        current_line = word
+            
+            # Add the last line if it has content
+            if current_line:
+                lines.append(current_line)
+            
+            # Add each wrapped line to the feed
+            for line in lines:
+                # Avoid duplicates by checking recent messages
+                if line not in self.feed[-5:]:
+                    self.feed.append(line)
+        else:
+            # Message fits in one line
+            if msg not in self.feed[-5:]:  # Check last 5 messages for duplicates
+                self.feed.append(msg)
+        
         # Keep only recent lines
         if len(self.feed) > 100:  # Reduce memory usage
             self.feed = self.feed[-100:]
@@ -98,7 +138,7 @@ class GameWindow:
         sys.stdout.flush()
         self.mounted = True
 
-    def render(self, battle: Dict[str, Dict[str, Optional[object]]], title: str = 'Pokemon Showdown CLI'):
+    def render(self, battle: Dict[str, Dict[str, Optional[object]]], title: str = 'CLI-Mon Showdown'):
         if not self.enabled:
             return
         
@@ -617,9 +657,9 @@ def _humanize_line(line: str) -> Optional[str]:
     
     return None
 
-def _process_output(out_lines, humanize: bool, active_side: str, requests: Dict[str, dict], shown_rqid: Dict[str, Optional[int]], battle: Dict[str, BattleSide], ai_error_count: Dict[str, int], ui: Optional[GameWindow] = None) -> Optional[str]:
+def _process_output(out_lines, humanize: bool, active_side: str, requests: Dict[str, dict], shown_rqid: Dict[str, Optional[int]], battle: Dict[str, BattleSide], ai_error_count: Dict[str, int], current_turn: int = 0, ui: Optional[GameWindow] = None) -> Tuple[Optional[str], bool, int]:
     if not out_lines:
-        return None
+        return None, False, current_turn
     winner: Optional[str] = None
     overlay_changed = False
     player_error_detected = False
@@ -639,6 +679,13 @@ def _process_output(out_lines, humanize: bool, active_side: str, requests: Dict[
         if '|turn|' in line:
             shown_rqid['p1'] = None
             shown_rqid['p2'] = None
+            # Extract turn number for LLM agent context
+            try:
+                parts = line.split('|turn|')
+                if len(parts) > 1:
+                    current_turn = int(parts[1].strip())
+            except (ValueError, IndexError):
+                pass  # Keep existing turn number if parsing fails
             debug_print("New turn detected; reset shown_rqid for both sides", "REQUESTS")
         # Check for player errors first to handle error recovery
         if '|error|' in line and ('Invalid choice' in line or 'Unavailable choice' in line):
@@ -712,7 +759,7 @@ def _process_output(out_lines, humanize: bool, active_side: str, requests: Dict[
             print(_render_overlay(battle))
     
     # Return winner and whether a player error was detected
-    return winner, player_error_detected
+    return winner, player_error_detected, current_turn
 
 def pack_team(path: str, formatname: str = "gen7ou", ps_path: str = "pokemon-showdown") -> str:
     import os
@@ -879,6 +926,411 @@ def _get_forced_switch_options(req: dict) -> List[dict]:
                 available.append({'index': i, 'pokemon': p})
     
     return available
+
+def _create_agent_observation(ai_req: dict, battle: Dict[str, BattleSide], ui: Optional[GameWindow] = None, current_turn: int = 0) -> dict:
+    """Create observation payload for the LLM agent."""
+    if not ai_req:
+        return {}
+    
+    # Extract active Pokemon information
+    active_data = {}
+    if ai_req.get('active') and len(ai_req['active']) > 0:
+        active_pokemon = ai_req['active'][0]
+        active_data = {
+            'moves': active_pokemon.get('moves', []),
+            'canMegaEvo': active_pokemon.get('canMegaEvo', False),
+            'canZMove': active_pokemon.get('canZMove'),
+            'canUltraBurst': active_pokemon.get('canUltraBurst', False),
+            'trapped': active_pokemon.get('trapped', False)
+        }
+    
+    # Extract bench information (team summary)
+    bench_data = []
+    side_data = ai_req.get('side', {})
+    pokemon_list = side_data.get('pokemon', [])
+    
+    for i, pokemon in enumerate(pokemon_list, start=1):
+        # Extract condition info (HP and status)
+        condition = pokemon.get('condition', '')
+        hp_info = {'fainted': 'fnt' in condition}
+        
+        # Parse HP from condition (e.g., "183/281" or "58/100")
+        if condition and not hp_info['fainted']:
+            if '/' in condition:
+                hp_part = condition.split()[0] if ' ' in condition else condition
+                if '/' in hp_part:
+                    try:
+                        current_hp, max_hp = hp_part.split('/')
+                        hp_info['current_hp'] = int(current_hp)
+                        hp_info['max_hp'] = int(max_hp)
+                        hp_info['hp_percent'] = int(round((int(current_hp) / int(max_hp)) * 100))
+                    except ValueError:
+                        pass
+        
+        # Extract status condition
+        status = None
+        if ' ' in condition:
+            status_part = condition.split(' ', 1)[1]
+            if status_part not in ['fnt']:
+                status = status_part
+        
+        bench_data.append({
+            'index': i,
+            'species': pokemon.get('details', '').split(',')[0] if pokemon.get('details') else 'Unknown',
+            'details': pokemon.get('details', ''),
+            'condition': condition,
+            'hp_info': hp_info,
+            'status': status,
+            'active': pokemon.get('active', False),
+            'item': pokemon.get('item'),
+            'ability': pokemon.get('ability'),
+            'stats': pokemon.get('stats'),
+            'moves': pokemon.get('moves')
+        })
+    
+    # Extract opponent information (public battle state)
+    opponent_data = battle.get('p1', {})
+    
+    # Get available moves
+    available_moves = []
+    moves_data = _get_available_moves(ai_req)
+    for i, move in enumerate(moves_data):
+        available_moves.append({
+            'index': move.get('original_index', i + 1),
+            'id': move.get('id', ''),
+            'move': move.get('move', ''),
+            'pp': move.get('pp'),
+            'maxpp': move.get('maxpp'),
+            'target': move.get('target', ''),
+            'disabled': move.get('disabled', False)
+        })
+    
+    # Get available switches
+    available_switches = []
+    switches_data = _get_available_switches(ai_req)
+    for switch in switches_data:
+        pokemon = switch['pokemon']
+        # Skip the currently active Pokemon
+        if not pokemon.get('active', False):
+            available_switches.append({
+                'index': switch['index'],
+                'species': pokemon.get('details', '').split(',')[0] if pokemon.get('details') else 'Unknown',
+                'details': pokemon.get('details', ''),
+                'condition': pokemon.get('condition', ''),
+                'hp_status': pokemon.get('condition', '').split()[0] if pokemon.get('condition') else ''
+            })
+    
+    # Get recent events from the UI feed
+    recent_events = []
+    if ui and ui.enabled and hasattr(ui, 'feed'):
+        # Get the last 10 entries from the feed for context
+        recent_events = ui.feed[-10:] if ui.feed else []
+    
+    # Check if this is a forced switch scenario
+    is_forced_switch = bool((ai_req.get('forceSwitch') or [False])[0])
+    
+    # Extract weather and terrain for clearer representation
+    weather = ai_req.get('weather', None)
+    field_conditions = ai_req.get('field', {})
+    
+    # Extract terrain specifically from field conditions if present
+    terrain = None
+    for key in field_conditions.keys():
+        if 'terrain' in key.lower():
+            terrain = key
+            break
+    
+    # Create the complete observation
+    observation = {
+        'turn': current_turn,
+        'active': active_data,
+        'bench': bench_data,
+        'opponent_active': {
+            'species': opponent_data.get('name'),
+            'hp_percent': opponent_data.get('hp_pct'),
+            'status': opponent_data.get('status'),
+            'fainted': opponent_data.get('fainted', False)
+        },
+        'recent_events': recent_events,
+        'available_moves': available_moves,
+        'available_switches': available_switches,
+        'is_forced_switch': is_forced_switch,
+        'can_move': bool(ai_req.get('active')) and not ai_req.get('wait'),
+        'must_wait': bool(ai_req.get('wait')),
+        'side_conditions': side_data.get('sideConditions', {}),
+        'field_conditions': field_conditions,
+        'weather': weather,
+        'terrain': terrain,
+        'pseudoWeather': ai_req.get('pseudoWeather', [])
+    }
+    
+    return observation
+
+def _llm_agent_decision(observation: dict, team_knowledge: Optional[dict] = None) -> dict:
+    """
+    LLM agent that makes decisions based on battle observation.
+    
+    Args:
+        observation: The battle state observation
+        team_knowledge: Optional pre-battle team information
+        
+    Returns:
+        Dictionary with 'action_type' ('move' or 'switch') and 'choice' (index or move name)
+    """
+    debug_print(f"LLM agent making decision. Forced switch: {observation.get('is_forced_switch', False)}", "LLM_AGENT")
+
+    # Compose a prompt for the LLM agent that includes the new conditions
+    prompt_context = (
+        f"Turn: {observation.get('turn')}\n"
+        f"Active Pokemon: {observation.get('active')}\n"
+        f"Bench: {observation.get('bench')}\n"
+        f"Opponent Active: {observation.get('opponent_active')}\n"
+        f"Recent Events: {observation.get('recent_events')}\n"
+        f"Available Moves: {observation.get('available_moves')}\n"
+        f"Available Switches: {observation.get('available_switches')}\n"
+        f"Is Forced Switch: {observation.get('is_forced_switch')}\n"
+        f"Can Move: {observation.get('can_move')}\n"
+        f"Must Wait: {observation.get('must_wait')}\n"
+        f"Side Conditions: {observation.get('side_conditions')}\n"
+        f"Field Conditions: {observation.get('field_conditions')}\n"
+        f"Weather: {observation.get('weather')}\n"
+        f"Terrain: {observation.get('terrain')}\n"
+        f"PseudoWeather: {observation.get('pseudoWeather')}\n"
+    )
+    debug_print(f"LLM agent prompt context:\n{prompt_context}", "LLM_AGENT_PROMPT")
+
+    # Handle forced switch scenarios
+    if observation.get('is_forced_switch', False):
+        available_switches = observation.get('available_switches', [])
+        if available_switches:
+            choice = available_switches[0]['index']
+            debug_print(f"LLM agent chose forced switch: {choice}", "LLM_AGENT")
+            return {
+                'action_type': 'switch',
+                'choice': choice,
+                'reasoning': f"Forced to switch to {available_switches[0]['species']}"
+            }
+        else:
+            debug_print("LLM agent: No switches available for forced switch", "LLM_AGENT")
+            return {'action_type': 'switch', 'choice': 1, 'reasoning': 'No valid switches available'}
+
+    # Handle wait scenarios (Pokemon can't move)
+    if observation.get('must_wait', False):
+        debug_print("LLM agent: Must wait, Pokemon cannot move", "LLM_AGENT")
+        return {
+            'action_type': 'wait',
+            'choice': None,
+            'reasoning': 'Pokemon cannot move this turn'
+        }
+
+    # Normal turn decision making
+    available_moves = observation.get('available_moves', [])
+    available_switches = observation.get('available_switches', [])
+
+    # Try to use Gemini AI agent first
+    try:
+        if GEMINI_AVAILABLE:
+            debug_print("Using Gemini AI agent for decision", "LLM_AGENT")
+            decision = get_gemini_decision(observation, team_knowledge)
+            return decision
+        else:
+            debug_print("Gemini not available, using heuristic fallback", "LLM_AGENT")
+            raise ImportError("Gemini agent not available")
+
+    except Exception as e:
+        debug_print(f"LLM decision error: {e}, falling back to heuristic", "LLM_AGENT")
+        # Fallback to simple logic if LLM fails
+        if available_moves:
+            # Simple heuristic: prefer moves with higher PP for sustainability
+            best_move = None
+            best_score = -1
+
+            for move in available_moves:
+                score = 0
+                pp = move.get('pp', 0)
+                max_pp = move.get('maxpp', 1)
+
+                # Prefer moves with more PP remaining
+                if max_pp > 0:
+                    score += (pp / max_pp) * 10
+
+                # Add some randomness for variety
+                score += random.random() * 5
+
+                if score > best_score:
+                    best_score = score
+                    best_move = move
+
+            if best_move:
+                debug_print(f"LLM agent chose move: {best_move['index']} ({best_move.get('move', 'unknown')})", "LLM_AGENT")
+                return {
+                    'action_type': 'move',
+                    'choice': best_move['index'],
+                    'reasoning': f"Selected {best_move.get('move', 'move')} (PP: {best_move.get('pp', '?')}/{best_move.get('maxpp', '?')})"
+                }
+
+        # If no moves available, try to switch
+        if available_switches:
+            # Simple switch logic - pick a random healthy Pokemon
+            choice = random.choice(available_switches)
+            debug_print(f"LLM agent chose switch: {choice['index']} ({choice['species']})", "LLM_AGENT")
+            return {
+                'action_type': 'switch',
+                'choice': choice['index'],
+                'reasoning': f"Switching to {choice['species']} ({choice['hp_status']})"
+            }
+
+    # Fallback - should rarely happen
+    debug_print("LLM agent: No valid actions available", "LLM_AGENT")
+    return {
+        'action_type': 'move',
+        'choice': 1,
+        'reasoning': 'Fallback action - no valid options detected'
+    }
+
+def _translate_agent_decision(decision: dict, ai_req: dict) -> Optional[str]:
+    """
+    Translate LLM agent decision into simulator command.
+    
+    Args:
+        decision: Decision from LLM agent
+        ai_req: Current request from simulator
+        
+    Returns:
+        Simulator command string or None if invalid
+    """
+    action_type = decision.get('action_type')
+    choice = decision.get('choice')
+    
+    if action_type == 'wait' or choice is None:
+        return None
+    
+    if action_type == 'switch':
+        # Validate switch choice
+        switches = _get_available_switches(ai_req)
+        valid_indices = [s['index'] for s in switches]
+        
+        if choice in valid_indices:
+            return f"switch {choice}"
+        else:
+            debug_print(f"Invalid switch choice {choice}, valid options: {valid_indices}", "TRANSLATION_ERROR")
+            # Fallback to first available switch
+            if valid_indices:
+                return f"switch {valid_indices[0]}"
+            return None
+    
+    elif action_type == 'move':
+        # Validate move choice
+        moves = _get_available_moves(ai_req)
+        valid_indices = [m.get('original_index', i+1) for i, m in enumerate(moves)]
+        
+        if choice in valid_indices:
+            return f"move {choice}"
+        else:
+            debug_print(f"Invalid move choice {choice}, valid options: {valid_indices}", "TRANSLATION_ERROR")
+            # Fallback to first available move
+            if valid_indices:
+                return f"move {valid_indices[0]}"
+            return None
+    
+    debug_print(f"Unknown action type: {action_type}", "TRANSLATION_ERROR")
+    return None
+
+def _parse_team_knowledge(team_content: str, side: str = "p2") -> dict:
+    """
+    Parse team file content to provide pre-battle knowledge to the LLM agent.
+    
+    Args:
+        team_content: Raw team file content (Showdown importable format)
+        side: Which side this team belongs to ("p1" or "p2")
+        
+    Returns:
+        Dictionary containing team knowledge
+    """
+    team_knowledge = {
+        'side': side,
+        'pokemon': [],
+        'format_info': {},
+        'raw_content': team_content
+    }
+    
+    if not team_content:
+        return team_knowledge
+    
+    try:
+        # Split by Pokemon (each Pokemon starts with a line that doesn't begin with whitespace)
+        lines = team_content.strip().split('\n')
+        current_pokemon = None
+        
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+                
+            # New Pokemon (line doesn't start with dash or whitespace in original)
+            if not line.startswith('-') and not line.startswith('@') and not line.startswith('Ability:') and not line.startswith('EVs:') and not line.startswith('IVs:') and not line.startswith('Nature:') and '@' in line:
+                if current_pokemon:
+                    team_knowledge['pokemon'].append(current_pokemon)
+                
+                # Parse pokemon name and item
+                if ' @ ' in line:
+                    name_part, item = line.split(' @ ', 1)
+                else:
+                    name_part = line
+                    item = None
+                
+                current_pokemon = {
+                    'name': name_part.strip(),
+                    'item': item.strip() if item else None,
+                    'ability': None,
+                    'moves': [],
+                    'nature': None,
+                    'evs': {},
+                    'ivs': {},
+                    'level': 50  # Default level
+                }
+            
+            elif current_pokemon:
+                # Parse Pokemon details
+                if line.startswith('Ability:'):
+                    current_pokemon['ability'] = line.replace('Ability:', '').strip()
+                elif line.startswith('EVs:'):
+                    ev_part = line.replace('EVs:', '').strip()
+                    # Parse EVs like "252 HP / 252 Atk / 4 SpD"
+                    for ev_stat in ev_part.split(' / '):
+                        if ' ' in ev_stat:
+                            value, stat = ev_stat.strip().split(' ', 1)
+                            try:
+                                current_pokemon['evs'][stat] = int(value)
+                            except ValueError:
+                                pass
+                elif line.startswith('IVs:'):
+                    iv_part = line.replace('IVs:', '').strip()
+                    # Parse IVs similar to EVs
+                    for iv_stat in iv_part.split(' / '):
+                        if ' ' in iv_stat:
+                            value, stat = iv_stat.strip().split(' ', 1)
+                            try:
+                                current_pokemon['ivs'][stat] = int(value)
+                            except ValueError:
+                                pass
+                elif line.endswith(' Nature'):
+                    current_pokemon['nature'] = line.replace(' Nature', '').strip()
+                elif line.startswith('- '):
+                    # Move
+                    move = line.replace('- ', '').strip()
+                    current_pokemon['moves'].append(move)
+        
+        # Add the last Pokemon
+        if current_pokemon:
+            team_knowledge['pokemon'].append(current_pokemon)
+            
+        debug_print(f"Parsed team knowledge for {side}: {len(team_knowledge['pokemon'])} Pokemon", "TEAM_KNOWLEDGE")
+        
+    except Exception as e:
+        debug_print(f"Error parsing team knowledge: {e}", "TEAM_KNOWLEDGE_ERROR")
+    
+    return team_knowledge
 
 def _show_pokemon_showdown_menu(req: dict, battle: Dict[str, BattleSide], active_side: str, ui: Optional[GameWindow] = None) -> str:
     """Display Pokemon Showdown style menu and get user choice."""
@@ -1083,6 +1535,20 @@ def main():
     
     debug_print("Starting improved CLI battle interface", "MAIN")
     debug_print(f"Command line args parsed: {args}", "MAIN")
+    
+    # Initialize Gemini agent if available and API key is set
+    if GEMINI_AVAILABLE and args.p2_ai:
+        try:
+            # Try to initialize Gemini agent
+            import os
+            api_key = os.getenv('GOOGLE_AI_API_KEY') or os.getenv('GEMINI_API_KEY')
+            if api_key:
+                init_gemini_agent(api_key)
+                debug_print("Gemini AI agent initialized successfully", "MAIN")
+            else:
+                debug_print("No API key found for Gemini. Set GOOGLE_AI_API_KEY environment variable to use AI agent", "MAIN")
+        except Exception as e:
+            debug_print(f"Failed to initialize Gemini agent: {e}", "MAIN")
 
     # Validate arguments
     if not args.randbat and (not args.p1 or not args.p2):
@@ -1097,23 +1563,36 @@ def main():
     # Determine format for random battles
     battle_format = args.format
     if args.randbat:
-        if args.format == 'gen7ou':  # If default format is unchanged, switch to random
-            battle_format = 'gen7randombattle'
+        # if args.format == 'gen7ou':  # If default format is unchanged, switch to random
+        #     battle_format = 'gen7randombattle'
         debug_print(f"Random battle enabled. Using format: {battle_format}", "MAIN")
+    else:
+        debug_print(f"Using specified format: {battle_format}", "MAIN")
    
     # Pack teams or generate for randbat
     try:
         if args.randbat:
+            print("Generating and validating random teams...")
             p1_team = showdown_wrapper.generate_random_team(formatid=battle_format)
             p2_team = showdown_wrapper.generate_random_team(formatid=battle_format)
             if not p1_team or not p2_team:
                 raise RuntimeError("Failed to generate random teams.")
             debug_print(f"Random teams generated for format {battle_format}", "TEAMS")
+            # For random battles, we don't have team file content to parse
+            team_knowledge = None
         else:
             print(f"Packing and validating teams... for {battle_format}")
+            # Read team file content for P2 (AI side) before packing
+            with open(args.p2, 'r', encoding='utf-8') as f:
+                p2_team_content = f.read()
+            
             p1_team = pack_team(args.p1, battle_format)
             p2_team = pack_team(args.p2, battle_format)
             debug_print(f"P1 team packed length: {len(p1_team)}, P2 team packed length: {len(p2_team)}", "TEAMS")
+            
+            # Parse team knowledge for the AI (P2)
+            team_knowledge = _parse_team_knowledge(p2_team_content, "p2")
+            debug_print(f"Team knowledge parsed for P2: {len(team_knowledge.get('pokemon', []))} Pokemon", "TEAMS")
     except RuntimeError as e:
         print(f"Error: {e}")
         print("Please check that Node.js is installed and team files are valid.")
@@ -1144,6 +1623,8 @@ def main():
     max_ai_loops = 15   # Prevent infinite loops
     preview_done = set()
     battle = _new_battle_state()
+    current_turn = 0  # Track current turn for LLM agent context
+    # team_knowledge will be set during team preparation
 
     # Setup UI window
     ui = GameWindow(enabled=args.window and sys.stdout.isatty())
@@ -1160,12 +1641,15 @@ def main():
             debug_print(f"Simulator output: {len(out) if out else 0} lines", "SIMULATOR")
             if out:
                 ai_loop_counter = 0  # Reset counter when we get simulator output
-                result = _process_output(out, humanize_mode, args.side, requests, shown_rqid, battle, ai_error_count, ui)
-                # Handle the updated return value (winner, player_error_detected)
-                if isinstance(result, tuple):
+                result = _process_output(out, humanize_mode, args.side, requests, shown_rqid, battle, ai_error_count, current_turn, ui)
+                # Handle the updated return value (winner, player_error_detected, current_turn)
+                if isinstance(result, tuple) and len(result) == 3:
+                    winner, player_error_detected, current_turn = result
+                elif isinstance(result, tuple) and len(result) == 2:
+                    # Backward compatibility if old return format is used
                     winner, player_error_detected = result
                 else:
-                    # Backward compatibility if old return format is used
+                    # Even more backward compatibility
                     winner = result
                     player_error_detected = False
                 
@@ -1195,8 +1679,42 @@ def main():
                     if not p1_can_switch or not p2_can_switch:
                          debug_print("Double KO detected, but one player has no remaining Pokemon. Game should end.", "MAIN")
                     else:
+                        if p1_can_switch and p2_can_switch:
+                            # Both sides have replacement options after a double KO.
+                            # Proactively handle the human side's forced switch here so the AI
+                            # can also choose in the same iteration below.
+                            try:
+                                human_side = args.side
+                                human_req = requests.get(human_side)
+                                # Only act if we actually have a forceSwitch-style request
+                                if human_req and (human_req.get('forceSwitch') or [False])[0]:
+                                    # Compute a stable rqid like in the normal handling path
+                                    player_rqid = human_req.get('rqid')
+                                    if player_rqid is None:
+                                        player_rqid = hash(
+                                            str(human_req.get('_seq')) +
+                                            '|' + str(human_req.get('active')) +
+                                            '|' + str(human_req.get('forceSwitch'))
+                                        )
+                                    if shown_rqid.get(human_side) != player_rqid:
+                                        # Prompt and send the human switch immediately
+                                        choice = _show_pokemon_showdown_menu(human_req, battle, human_side, ui)
+                                        sim.send(f">{human_side} {choice}")
+                                        note = f"[sent] {human_side} {choice}"
+                                        if ui and ui.enabled:
+                                            ui.add_feed(note)
+                                            ui.render(battle)
+                                        else:
+                                            print(f"\n{note}")
+                                        shown_rqid[human_side] = player_rqid
+                            except (KeyboardInterrupt, EOFError):
+                                print("\n\nBattle interrupted by user during switch selection")
+                                return
+                            except Exception as e:
+                                debug_print(f"Error handling double-KO switch prompt: {e}", "MAIN")
+
                         # Both players have fainted active pokemon but also have pokemon to switch to. This is the problematic state.
-                        raise Exception("Double KO detected: Both active Pokemon fainted simultaneously.")
+                        #raise Exception("Double KO detected: Both active Pokemon fainted simultaneously.")
                 
                 # If a player error was detected, force a short wait to get updated requests
                 if player_error_detected:
@@ -1240,7 +1758,7 @@ def main():
                     if ai_loop_counter >= max_ai_loops:
                         raise Exception("AI appears stuck in a loop without simulator response.")   
                 time.sleep(0.1)  # Prevent busy waiting
-            # Handle AI for P2 - prioritize forced switches over wait requests
+            # Handle AI for P2 - use LLM agent instead of random choices
             if args.p2_ai:
                 ai_req = requests.get('p2')
                 debug_print(f"P2 AI check - Has request: {bool(ai_req)}", "AI")
@@ -1261,41 +1779,12 @@ def main():
                     force_switch = (ai_req.get('forceSwitch') or [False])[0]
                     
                     if force_switch or shown_rqid.get('p2') != ai_rqid:
-                        # Handle forced switch FIRST (higher priority than wait)
-                        if (ai_req.get('forceSwitch') or [False])[0]:
-                            debug_print("P2 AI handling forced switch", "AI")
-                            # Debug: print the full request to understand the data structure
-                            if showdown_wrapper.DEBUG:
-                                print(f"[DEBUG] Forced switch request: {ai_req}")
-                            switches = _get_forced_switch_options(ai_req)
-                            debug_print(f"P2 AI forced switch options: {[s['index'] for s in switches]}", "AI")
-                            if switches:
-                                choice = switches[0]['index']  # Pick first available (excluding active)
-                                sim.send(f">p2 switch {choice}")
-                                note = f"[p2-ai] switch {choice}"
-                                if ui and ui.enabled:
-                                    ui.add_feed(note)
-                                    ui.render(battle)
-                                else:
-                                    print(note)
-                                debug_print(f"P2 AI sent switch: {choice}", "AI")
-                                shown_rqid['p2'] = ai_rqid
-                                ai_loop_counter = 0  # Reset counter on successful action
-                                continue  # Continue to process response immediately
-                            else:
-                                debug_print("P2 AI: No valid switches available for forced switch!", "AI")
-                                # Check if this is end of game scenario (all Pokemon fainted)
-                                all_fainted = all(poke.get('condition', '').endswith('fnt') 
-                                                for poke in ai_req.get('side', {}).get('pokemon', []))
-                                if all_fainted:
-                                    debug_print("P2 AI: All Pokemon fainted - game should end", "AI")
-                                    # Send forfeit to end the game gracefully
-                                    sim.send(">p2 forfeit")
-                                    debug_print("P2 AI: Sent forfeit due to no available Pokemon", "AI")
-                                shown_rqid['p2'] = ai_rqid
-                                break
-                        # Handle "wait": true or "cant": true requests (Pokemon can't move due to paralysis, flinch, etc.)
-                        elif ai_req.get('wait') or ai_req.get('cant'):
+                        # Create observation for LLM agent
+                        observation = _create_agent_observation(ai_req, battle, ui, current_turn)
+                        debug_print(f"Created observation for LLM agent: turn {current_turn}", "LLM_AGENT")
+                        
+                        # Handle wait requests first (Pokemon can't move)
+                        if ai_req.get('wait') or ai_req.get('cant'):
                             debug_print("P2 AI has wait request - Pokemon can't move", "AI")
                             note = f"[p2-ai] Pokemon can't move"
                             if ui and ui.enabled:
@@ -1304,57 +1793,93 @@ def main():
                             else:
                                 print(note)
                             shown_rqid['p2'] = ai_rqid
-                            continue  # Continue to process response immediately
-                        # Handle moves
-                        elif ai_req.get('active'):
-                            debug_print("P2 AI handling moves", "AI")
-                            moves = _get_available_moves(ai_req)
-                            if moves:
-                                # Check if AI has too many errors, try switching instead
-                                if ai_error_count.get('p2', 0) >= max_ai_errors:
-                                    debug_print("Too many AI errors, attempting switch instead", "AI")
-                                    switches = _get_available_switches(ai_req)
-                                    if switches and len(switches) > 1:  # More than just active Pokemon
-                                        # Find a non-active Pokemon to switch to
-                                        active_pokemon = ai_req.get('side', {}).get('pokemon', [{}])[0]
-                                        active_name = active_pokemon.get('ident', '')
-                                        for switch in switches:
-                                            if switch['pokemon'].get('ident', '') != active_name:
-                                                sim.send(f">p2 switch {switch['index']}")
-                                                note = f"[p2-ai] switch {switch['index']} (error recovery)"
-                                                if ui and ui.enabled:
-                                                    ui.add_feed(note)
-                                                    ui.render(battle)
-                                                else:
-                                                    print(note)
-                                                debug_print(f"P2 AI emergency switch: {switch['index']}", "AI")
-                                                ai_error_count['p2'] = 0  # Reset error count
-                                                shown_rqid['p2'] = ai_rqid
-                                                continue
-                                
-                                # Get the actual move indices from the full moveset
-                                active = ai_req['active'][0]
-                                all_moves = active.get('moves', [])
-                                
-                                # Find available move indices (1-based)
-                                available_indices = []
-                                for i, move in enumerate(all_moves, start=1):
-                                    if not move.get('disabled'):
-                                        available_indices.append(i)
-                                
-                                if available_indices:
-                                    pick = random.choice(available_indices)
-                                    sim.send(f">p2 move {pick}")
-                                    note = f"[p2-ai] move {pick}"
+                            continue
+                        
+                        # Get decision from LLM agent
+                        try:
+                            decision = _llm_agent_decision(observation, team_knowledge)
+                            debug_print(f"LLM agent decision: {decision}", "LLM_AGENT")
+                            
+                            # Translate decision to simulator command
+                            command = _translate_agent_decision(decision, ai_req)
+                            
+                            if command:
+                                sim.send(f">p2 {command}")
+                                reasoning = decision.get('reasoning', 'No reasoning provided')
+                                note = f"[p2-ai] {command} ({reasoning})"
+                                if ui and ui.enabled:
+                                    ui.add_feed(note)
+                                    #ui.render(battle)
+                                else:
+                                    print(note)
+                                debug_print(f"P2 AI sent command: {command}", "AI")
+                                shown_rqid['p2'] = ai_rqid
+                                ai_loop_counter = 0  # Reset counter on successful action
+                                ai_error_count['p2'] = 0  # Reset error count on successful action
+                                continue
+                            else:
+                                debug_print("LLM agent failed to generate valid command", "AI")
+                                ai_error_count['p2'] += 1
+                        
+                        except Exception as e:
+                            debug_print(f"LLM agent error: {e}", "AI_ERROR")
+                            ai_error_count['p2'] += 1
+                        
+                        # Fallback for errors - try to handle basic cases
+                        if ai_error_count.get('p2', 0) >= max_ai_errors:
+                            debug_print("Too many AI errors, using fallback logic", "AI")
+                            
+                            # Handle forced switch as fallback
+                            if (ai_req.get('forceSwitch') or [False])[0]:
+                                switches = _get_forced_switch_options(ai_req)
+                                if switches:
+                                    choice = switches[0]['index']
+                                    sim.send(f">p2 switch {choice}")
+                                    note = f"[p2-ai] switch {choice} (fallback)"
                                     if ui and ui.enabled:
                                         ui.add_feed(note)
                                         ui.render(battle)
                                     else:
                                         print(note)
-                                    debug_print(f"P2 AI sent move: {pick}", "AI")
+                                    debug_print(f"P2 AI fallback switch: {choice}", "AI")
                                     shown_rqid['p2'] = ai_rqid
-                                    ai_loop_counter = 0  # Reset counter on successful action
-                                    continue  # Continue to process response immediately
+                                    ai_error_count['p2'] = 0
+                                    continue
+                                else:
+                                    # Check if this is end of game scenario
+                                    all_fainted = all(poke.get('condition', '').endswith('fnt') 
+                                                    for poke in ai_req.get('side', {}).get('pokemon', []))
+                                    if all_fainted:
+                                        debug_print("P2 AI: All Pokemon fainted - game should end", "AI")
+                                        sim.send(">p2 forfeit")
+                                        debug_print("P2 AI: Sent forfeit due to no available Pokemon", "AI")
+                                    shown_rqid['p2'] = ai_rqid
+                                    break
+                            
+                            # Handle moves as fallback
+                            elif ai_req.get('active'):
+                                moves = _get_available_moves(ai_req)
+                                if moves:
+                                    active = ai_req['active'][0]
+                                    all_moves = active.get('moves', [])
+                                    available_indices = []
+                                    for i, move in enumerate(all_moves, start=1):
+                                        if not move.get('disabled'):
+                                            available_indices.append(i)
+                                    
+                                    if available_indices:
+                                        pick = random.choice(available_indices)
+                                        sim.send(f">p2 move {pick}")
+                                        note = f"[p2-ai] move {pick} (fallback)"
+                                        if ui and ui.enabled:
+                                            ui.add_feed(note)
+                                            ui.render(battle)
+                                        else:
+                                            print(note)
+                                        debug_print(f"P2 AI fallback move: {pick}", "AI")
+                                        shown_rqid['p2'] = ai_rqid
+                                        ai_error_count['p2'] = 0
+                                        continue
 
             # AI loop detection - prevent infinite loops when simulator doesn't respond
             if args.p2_ai and requests.get('p2'):

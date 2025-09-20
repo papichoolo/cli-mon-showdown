@@ -1,0 +1,55 @@
+Gengar @ Life Orb
+Ability: Cursed Body
+EVs: 4 Def / 252 SpA / 252 Spe
+Timid Nature
+- Destiny Bond
+- Shadow Ball
+- Sludge Wave
+- Taunt
+
+Landorus-Therian @ Choice Scarf
+Ability: Intimidate
+EVs: 252 Atk / 4 Def / 252 Spe
+Jolly Nature
+- Earthquake
+- U-turn
+- Stone Edge
+- Knock Off
+
+Tapu Koko @ Electrium Z
+Ability: Electric Surge
+EVs: 4 Def / 252 SpA / 252 Spe
+Timid Nature
+- Thunderbolt
+- Hidden Power [Ice]
+- Dazzling Gleam
+- Volt Switch
+
+Ferrothorn @ Leftovers
+Ability: Iron Barbs
+EVs: 252 HP / 88 Def / 168 SpD
+Relaxed Nature
+IVs: 0 Spe
+- Stealth Rock
+- Leech Seed
+- Power Whip
+- Gyro Ball
+
+Heatran @ Leftovers
+Ability: Flash Fire
+EVs: 248 HP / 8 SpA / 252 SpD
+Calm Nature
+- Magma Storm
+- Toxic
+- Taunt
+- Earth Power
+
+Kartana @ Choice Scarf
+Ability: Beast Boost
+EVs: 252 Atk / 4 SpD / 252 Spe
+Jolly Nature
+- Leaf Blade
+- Smart Strike
+- Sacred Sword
+- Knock Off
+

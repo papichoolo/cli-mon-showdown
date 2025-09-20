@@ -1,53 +1,61 @@
-Klefki @ Leftovers
-Ability: Prankster
-EVs: 252 HP / 4 Def / 252 SpD
-Calm Nature
-- Thunder Wave
-- Spikes
-- Foul Play
-- Hypnosis
+Torkoal @ Heat Rock  
+Ability: Drought  
+Tera Type: Ground  
+EVs: 104 HP / 252 SpA / 152 SpD  
+Quiet Nature  
+- Eruption  
+- Overheat  
+- Earthquake  
+- Stealth Rock  
 
-Talonflame @ Sharp Beak  
-Ability: Gale Wings  
-EVs: 252 Atk / 4 Def / 252 Spe  
-Adamant Nature  
-- Brave Bird  
-- Flare Blitz  
-- Swords Dance  
-- Roost  
+Hatterene @ Air Balloon  
+Ability: Magic Bounce  
+Tera Type: Ghost  
+EVs: 252 HP / 252 Def / 4 SpD  
+Relaxed Nature  
+IVs: 0 Atk / 0 Spe  
+- Trick Room  
+- Psychic Noise  
+- Dazzling Gleam  
+- Healing Wish  
 
-Clefable @ Leftovers  
-Ability: Magic Guard  
-EVs: 252 HP / 172 Def / 84 SpD  
-Calm Nature  
-- Moonblast  
-- Flamethrower  
-- Calm Mind  
-- Soft-Boiled  
-
-Rotom-Wash @ Sitrus Berry  
-Ability: Levitate  
-EVs: 248 HP / 28 SpA / 232 Spe  
+Raging Bolt @ Life Orb  
+Ability: Protosynthesis  
+Tera Type: Ghost  
+EVs: 36 Def / 252 SpA / 220 Spe  
 Modest Nature  
-- Hydro Pump  
-- Volt Switch  
-- Will-O-Wisp  
-- Pain Split  
+IVs: 20 Atk  
+- Thunderclap  
+- Weather Ball  
+- Dragon Pulse  
+- Solar Beam  
 
-Scizor-Mega @ Scizorite  
-Ability: Technician  
-EVs: 248 HP / 44 Atk / 216 SpD  
-Impish Nature  
-- Bullet Punch  
+Slither Wing @ Assault Vest  
+Ability: Protosynthesis  
+Tera Type: Fire  
+EVs: 40 HP / 252 Atk / 216 Spe  
+Adamant Nature  
 - U-turn  
-- Roost  
-- Defog  
+- First Impression  
+- Earthquake  
+- Temper Flare  
 
-Keldeo @ Choice Specs  
-Ability: Justified  
-EVs: 4 Def / 252 SpA / 252 Spe  
+Venusaur @ Life Orb  
+Ability: Chlorophyll  
+Tera Type: Fire  
+EVs: 4 Atk / 252 SpA / 252 Spe  
+Naive Nature  
+- Growth  
+- Giga Drain  
+- Weather Ball  
+- Earthquake  
+
+Walking Wake @ Wise Glasses  
+Ability: Protosynthesis  
+Tera Type: Fairy  
+EVs: 12 HP / 244 SpA / 252 Spe  
 Timid Nature  
-- Scald  
-- Secret Sword  
-- Hydro Pump  
-- Icy Wind  
+- Hydro Steam  
+- Weather Ball  
+- Draco Meteor  
+- Flip Turn  

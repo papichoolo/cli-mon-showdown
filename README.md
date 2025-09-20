@@ -7,6 +7,7 @@ Note: You need a local clone of Pokémon Showdown. This repo expects it at `poke
 ## Features
 
 - Accurate engine: uses the official Pokémon Showdown simulator
+- AI opponents: Gemini AI agent for strategic battle decisions
 - Teams: load Showdown import/export text files
 - CLI-first: fast feedback loop and readable battle feed
 - Random battles: generate teams via Showdown
@@ -14,6 +15,7 @@ Note: You need a local clone of Pokémon Showdown. This repo expects it at `poke
 ## Project Structure
 
 - `cli.py` – main CLI battle runner
+- `gemini_agent.py` – Gemini AI agent for strategic battle decisions
 - `showdown_wrapper.py` – thin wrapper around the Showdown Node process
 - `teams/` – example team files in Showdown format
 - `BATTLE_FIXES.md` – notes on battle handling improvements
@@ -46,6 +48,80 @@ cd ..
 python cli.py teams/p1.txt teams/p2.txt --format gen7ou
 ```
 
+## Gemini AI Agent Configuration
+
+The CLI includes an optional Gemini AI agent that can play as Player 2, making strategic decisions based on battle state analysis. This provides a more challenging and realistic opponent compared to the default random AI.
+
+### Prerequisites
+
+1. **Google AI API Key**: You need access to Google's Gemini API
+   - Get an API key from [Google AI Studio](https://aistudio.google.com/apikey)
+   - The API may require billing setup depending on usage
+
+2. **Python Dependencies**: Install the required packages
+   ```powershell
+   pip install -r requirements.txt
+   ```
+
+### Configuration
+
+Set your API key using one of these methods:
+
+**Option 1: Environment Variable (Recommended)**
+```powershell
+# PowerShell (persistent)
+[Environment]::SetEnvironmentVariable("GOOGLE_AI_API_KEY", "your-api-key-here", "User")
+
+# PowerShell (current session only)
+$env:GOOGLE_AI_API_KEY = "your-api-key-here"
+```
+
+**Option 2: Alternative Environment Variable**
+```powershell
+$env:GEMINI_API_KEY = "your-api-key-here"
+```
+
+### Usage with Gemini AI
+
+Once configured, the Gemini AI agent will automatically be used for Player 2 when the `--p2-ai` flag is enabled (which is the default):
+
+```powershell
+# Gemini AI will control Player 2 automatically
+python cli.py teams/p1.txt teams/p2.txt --format gen7ou
+
+# Support for Random Battles as well
+python cli.py --randbat
+```
+
+### Features of the Gemini AI Agent
+
+- **Strategic Analysis**: Evaluates complex battle states including HP, status conditions, type matchups, and team composition
+- **Advanced Decision Making**: Considers win conditions, hazard management, momentum, and endgame scenarios
+- **Competitive Play Style**: Follows high-level competitive Pokemon principles and strategies
+- **Fallback Safety**: Automatically falls back to basic heuristics if API calls fail
+
+### Model Configuration
+
+The default model is `gemini-2.5-flash-lite` for optimal performance and cost. Advanced users can modify the model in `gemini_agent.py`:
+
+```python
+# In gemini_agent.py, modify the init_gemini_agent function
+agent = init_gemini_agent(model_name="gemini-2.5-flash")  # More capable but slower/costlier
+```
+
+Available models:
+- `gemini-2.5-flash-lite` (default): Fast, cost-effective
+- `gemini-2.5-flash`: More capable, higher cost
+- `gemini-2.0-flash-exp`: Experimental features
+
+### Troubleshooting Gemini Setup
+
+- **"No API key found"**: Ensure your environment variable is set correctly and restart your terminal
+- **API errors**: Check that your API key is valid and you have sufficient quota
+- **Import errors**: Run `pip install -r requirements.txt` to install dependencies
+- **Fallback behavior**: If Gemini fails, the system automatically uses random decisions with a warning message
+
+
 Bash (macOS/Linux):
 
 ```bash
@@ -63,7 +139,7 @@ python3 cli.py teams/p1.txt teams/p2.txt --format gen7ou
 
 ## Setup Details
 
-- Python: this project uses only the standard library; `requirements.txt` is intentionally empty.
+- Python: this project uses the standard library plus optional AI dependencies. See `requirements.txt` for AI agent dependencies.
 - Node: used to run the Showdown simulator and its CLI utilities (`simulate-battle`, `pack-team`, `validate-team`, `generate-team`).
 - Showdown path: by default the code looks for `pokemon-showdown/pokemon-showdown`. Keep the folder at the project root or adjust the code if you move it.
 
@@ -89,7 +165,7 @@ python cli.py --randbat --format gen7randombattle
 - --randbat: generate random teams for both players (ignores p1/p2 positional args).
 - --no-auto-preview: disable automatic team preview ordering; you’ll be prompted to choose.
 - --side {p1|p2}: which side unprefixed commands control. Default: p1.
-- --p2-ai / --no-p2-ai: enable/disable simple random-choice AI for Player 2. Default: enabled.
+- --p2-ai / --no-p2-ai: enable/disable AI for Player 2. When enabled with Gemini configured, uses Gemini AI agent. Default: enabled.
 - --humanize / --raw: show a summarized human-readable feed (default) or raw Showdown log lines.
 - --window / --no-window: render a minimal in-terminal game window (default) or print plain text only.
 - --debug: print additional debug information.
@@ -108,6 +184,9 @@ python cli.py teams/p1.txt teams/p2.txt --side p2 --no-p2-ai --raw
 
 # Disable the windowed UI and team auto-preview
 python cli.py teams/p1.txt teams/p2.txt --no-window --no-auto-preview
+
+# Play against Gemini AI with debug information
+python cli.py teams/p1.txt teams/p2.txt --format gen9ou --debug --p2-ai
 ```
 
 ## Teams

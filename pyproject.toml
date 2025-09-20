@@ -2,6 +2,12 @@
 requires = ["setuptools>=69", "wheel"]
 build-backend = "setuptools.build_meta"
 
+[tool.setuptools]
+# Explicitly disable automatic package discovery to prevent CI metadata issues
+packages = ["cli_mon_showdown"]
+package-dir = {"cli_mon_showdown" = "src/cli_mon_showdown"}
+include-package-data = true
+
 [project]
 name = "cli-mon-showdown"
 version = "0.1.3"
@@ -35,6 +41,3 @@ cli-mon = "cli_mon_showdown.cli:main"
 Homepage = "https://github.com/papichoolo/cli-mon-showdown"
 Repository = "https://github.com/papichoolo/cli-mon-showdown"
 Issues = "https://github.com/papichoolo/cli-mon-showdown/issues"
-
-[tool.setuptools.packages.find]
-where = ["src"]

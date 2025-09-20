@@ -13,6 +13,9 @@ jobs:
   build-and-publish:
     name: Build and publish to PyPI
     runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/cli-mon-showdown/
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -44,6 +47,14 @@ jobs:
           pip install dist/*.whl
           cli-mon --help
 
+      - name: Create deployment
+        uses: chrnorm/deployment-action@v2
+        id: deployment
+        with:
+          token: '${{ github.token }}'
+          environment-url: https://pypi.org/project/cli-mon-showdown/
+          environment: pypi
+
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@v1.8.14
         with:
@@ -51,3 +62,21 @@ jobs:
           password: ${{ secrets.PYPI_API_TOKEN }}
           verbose: true
           skip-existing: true
+
+      - name: Update deployment status (success)
+        if: success()
+        uses: chrnorm/deployment-status@v2
+        with:
+          token: '${{ github.token }}'
+          environment-url: https://pypi.org/project/cli-mon-showdown/
+          deployment-id: ${{ steps.deployment.outputs.deployment_id }}
+          state: 'success'
+
+      - name: Update deployment status (failure)
+        if: failure()
+        uses: chrnorm/deployment-status@v2
+        with:
+          token: '${{ github.token }}'
+          environment-url: https://pypi.org/project/cli-mon-showdown/
+          deployment-id: ${{ steps.deployment.outputs.deployment_id }}
+          state: 'failure'

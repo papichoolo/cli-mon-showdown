@@ -42,6 +42,16 @@ jobs:
           ls -la src/cli_mon_showdown/ || echo "No package directory"
           echo "=== pyproject.toml content ==="
           cat pyproject.toml
+          echo "=== Test metadata parsing ==="
+          python -c "
+          import tomllib
+          with open('pyproject.toml', 'rb') as f:
+              data = tomllib.load(f)
+              project = data.get('project', {})
+              print(f'Project name from pyproject.toml: {project.get(\"name\")}')
+              print(f'Project version from pyproject.toml: {project.get(\"version\")}')
+              print(f'Build system: {data.get(\"build-system\", {})}')
+          "
 
       - name: Build sdist and wheel
         run: |

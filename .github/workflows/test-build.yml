@@ -62,6 +62,7 @@ jobs:
           python -c "
           import setuptools.build_meta as build_meta
           from pathlib import Path
+          import os
           try:
               metadata = build_meta.get_requires_for_build_wheel()
               print('Build wheel requirements:', metadata)
@@ -69,7 +70,6 @@ jobs:
               metadata_path = build_meta.prepare_metadata_for_build_wheel('temp_metadata')
               print('Metadata prepared at:', metadata_path)
               if Path(metadata_path).exists():
-                  import os
                   for f in os.listdir(metadata_path):
                       print(f'Metadata file: {f}')
                       if f.endswith('.dist-info'):
@@ -80,8 +80,32 @@ jobs:
                                   if info_file.name == 'METADATA':
                                       content = info_file.read_text()
                                       print(f'  Content preview: {content[:300]}')
+                                      print(f'  Has Name: {\"Name:\" in content}')
+                                      print(f'  Has Version: {\"Version:\" in content}')
           except Exception as e:
               print(f'Metadata generation test failed: {e}')
+              import traceback
+              traceback.print_exc()
+          "
+          echo "=== Examine actual built wheel ==="
+          python -c "
+          import zipfile
+          import os
+          for f in os.listdir('dist'):
+              if f.endswith('.whl'):
+                  print(f'=== Examining {f} ===')
+                  try:
+                      with zipfile.ZipFile(f'dist/{f}') as z:
+                          files = z.namelist()
+                          print('All files in wheel:', files)
+                          metadata_files = [n for n in files if 'METADATA' in n or 'PKG-INFO' in n]
+                          print('Metadata files found:', metadata_files)
+                          for mf in metadata_files:
+                              print(f'--- Content of {mf} ---')
+                              content = z.read(mf).decode('utf-8')
+                              print(content[:500])
+                  except Exception as e:
+                      print(f'Error examining wheel: {e}')
           "
 
       - name: Verify artifacts

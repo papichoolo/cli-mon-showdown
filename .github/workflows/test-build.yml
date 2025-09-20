@@ -1,18 +1,15 @@
-name: Publish
+name: Test Build
 
 on:
   push:
-    tags:
-      - 'v*'
+    branches: [ test, master, pip-test ]
+  pull_request:
+    branches: [ test, master ]
   workflow_dispatch:
 
-permissions:
-  contents: read
-  id-token: write
-
 jobs:
-  build-and-publish:
-    name: Build and publish to PyPI
+  test-build:
+    name: Test build process
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -112,12 +109,9 @@ jobs:
           echo "=== Testing package installation ==="
           pip install dist/*.whl
           echo "=== Testing CLI entry point ==="
-          cli-mon --help || echo "CLI entry point test failed"
+          cli-mon --help || echo "CLI entry point failed"
 
-      - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@v1.8.14
-        with:
-          user: __token__
-          password: ${{ secrets.PYPI_API_TOKEN }}
-          verbose: true
-          skip-existing: true
+      - name: Check for PyPI name conflicts
+        run: |
+          echo "=== Checking if package name exists on PyPI ==="
+          curl -s "https://pypi.org/pypi/cli-mon-showdown/json" | grep -q "Not Found" && echo "Package name available" || echo "Package name might be taken"

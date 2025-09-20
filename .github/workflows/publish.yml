@@ -7,7 +7,9 @@ on:
 
 permissions:
   contents: read
+  deployments: write
   id-token: write
+  actions: write
 
 jobs:
   build-and-publish:

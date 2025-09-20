@@ -14,38 +14,47 @@ Note: You need a local clone of Pokémon Showdown. This repo expects it at `poke
 
 ## Project Structure
 
-- `cli.py` – main CLI battle runner
-- `gemini_agent.py` – Gemini AI agent for strategic battle decisions
-- `showdown_wrapper.py` – thin wrapper around the Showdown Node process
-- `teams/` – example team files in Showdown format
-- `BATTLE_FIXES.md` – notes on battle handling improvements
+- `src/cli_mon_showdown/` - installable Python package (CLI, wrapper, Gemini agent)
+- `cli.py` - shim so `cli-mon` still works locally
+- `pokemon-showdown/` - expected checkout of the Node simulator
+- `teams/` - example team files in Showdown format
+- `BATTLE_FIXES.md` - notes on battle handling improvements
 
 ## Requirements
 
-- Python 3.8+
-- Node.js 16+
-- A local checkout of `smogon/pokemon-showdown`
+- Python 3.10+
+- Node.js 18+
+- A local checkout of `smogon/pokemon-showdown` (default path `pokemon-showdown/`)
 
 ## Quick Start
 
-PowerShell (Windows):
+### Install from PyPI (once published)
+
+```bash
+pip install cli-mon-showdown
+cli-mon --help
+```
+
+### Run from a local clone
 
 ```powershell
 git clone https://github.com/papichoolo/cli-mon-showdown.git
 cd cli-mon-showdown
 
-# Optional: create a virtualenv (no external Python deps required)
 python -m venv .venv
 .venv\Scripts\activate
 
-# Get Pokémon Showdown inside this project
+# Install the package in editable mode (includes Python dependencies)
+pip install -e .
+
+# Fetch the Showdown simulator
 git clone https://github.com/smogon/pokemon-showdown.git
 cd pokemon-showdown
 npm ci
 cd ..
 
 # Run a battle with sample teams
-python cli.py teams/p1.txt teams/p2.txt --format gen7ou
+cli-mon teams/p1.txt teams/p2.txt --format gen7ou
 ```
 
 ## Gemini AI Agent Configuration
@@ -87,10 +96,10 @@ Once configured, the Gemini AI agent will automatically be used for Player 2 whe
 
 ```powershell
 # Gemini AI will control Player 2 automatically
-python cli.py teams/p1.txt teams/p2.txt --format gen7ou
+cli-mon teams/p1.txt teams/p2.txt --format gen7ou
 
 # Support for Random Battles as well
-python cli.py --randbat
+cli-mon --randbat
 ```
 
 ### Features of the Gemini AI Agent
@@ -148,13 +157,13 @@ python3 cli.py teams/p1.txt teams/p2.txt --format gen7ou
 Basic:
 
 ```powershell
-python cli.py <p1_team> <p2_team> [--format FORMAT] [flags]
+cli-mon <p1_team> <p2_team> [--format FORMAT] [flags]
 ```
 
 Random battle (no team files required):
 
 ```powershell
-python cli.py --randbat --format gen7randombattle
+cli-mon --randbat --format gen7randombattle
 ```
 
 ### Flags
@@ -174,19 +183,19 @@ Examples:
 
 ```powershell
 # Gen 7 OU with built teams
-python cli.py teams/p1.txt teams/p2.txt --format gen7ou
+cli-mon teams/p1.txt teams/p2.txt --format gen7ou
 
 # Random battle using Showdown’s generator
-python cli.py --randbat --format gen7randombattle
+cli-mon --randbat --format gen7randombattle
 
 # Control p2 manually and show raw stream
-python cli.py teams/p1.txt teams/p2.txt --side p2 --no-p2-ai --raw
+cli-mon teams/p1.txt teams/p2.txt --side p2 --no-p2-ai --raw
 
 # Disable the windowed UI and team auto-preview
-python cli.py teams/p1.txt teams/p2.txt --no-window --no-auto-preview
+cli-mon teams/p1.txt teams/p2.txt --no-window --no-auto-preview
 
 # Play against Gemini AI with debug information
-python cli.py teams/p1.txt teams/p2.txt --format gen9ou --debug --p2-ai
+cli-mon teams/p1.txt teams/p2.txt --format gen9ou --debug --p2-ai
 ```
 
 ## Teams
@@ -216,4 +225,33 @@ When you run the CLI, your teams are packed and validated via Showdown’s CLI (
 ---
 
 Created by papichoolo. Uses the official Pokémon Showdown simulator.
+
+## Packaging and Release
+
+### Local build
+
+```bash
+python -m pip install --upgrade build twine
+python -m build
+```
+
+Artifacts will land in `dist/`. Install one with `pip install dist/cli_mon_showdown-<version>-py3-none-any.whl`.
+
+### TestPyPI dry run
+
+```bash
+python -m twine upload --repository testpypi dist/*
+python -m pip install --index-url https://test.pypi.org/simple/ cli-mon-showdown
+```
+
+### Production release
+
+1. Bump the version in `pyproject.toml`.
+2. Tag the commit (`git tag v0.1.1 && git push origin v0.1.1`).
+3. Upload with `python -m twine upload dist/*` or trigger the GitHub Action described below.
+
+### GitHub Actions automation
+
+Store a PyPI token as the `PYPI_API_TOKEN` repository secret (optionally scope it with an environment named `pypi`).
+The workflow in `.github/workflows/publish.yml` publishes whenever a tag that looks like `v*` is pushed.
 

@@ -55,6 +55,7 @@ jobs:
           try:
               metadata = build_meta.get_requires_for_build_wheel()
               print('Build wheel requirements:', metadata)
+              Path('temp_metadata').mkdir(exist_ok=True)
               metadata_path = build_meta.prepare_metadata_for_build_wheel('temp_metadata')
               print('Metadata prepared at:', metadata_path)
               if Path(metadata_path).exists():

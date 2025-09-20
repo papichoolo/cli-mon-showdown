@@ -5,12 +5,13 @@ This module provides an interface to Google's Gemini API for making strategic
 Pokemon battle decisions based on game state observations.
 """
 
+#import chunk
 import json
 import os
 from typing import Dict, Optional, Tuple, Any
 from google import genai
 from pydantic import BaseModel, Field
-from google.generativeai.types import HarmCategory, HarmBlockThreshold
+#from google.generativeai.types import HarmCategory, HarmBlockThreshold
 from google.genai import types
 
 class ModelAction(BaseModel):
@@ -347,14 +348,17 @@ class GeminiPokemonAgent:
 response_mime_type="application/json",
 response_schema=ModelAction,
 thinking_config=types.ThinkingConfig(
-thinking_budget=-1)
+thinking_budget=-1,
+include_thoughts=True)
             ),
             contents=prompt
             )
             #print(prompt)
             # Parse the response
+            thoughts = self.return_thoughts(response)
+            #print("Thoughts:", thoughts)
             if response.text:
-                return self.parse_llm_response(response.text, observation)
+                return self.parse_llm_response(response.text, observation, thoughts)
             else:
                 raise ValueError("Empty response from Gemini")
                 
@@ -362,8 +366,20 @@ thinking_budget=-1)
             print(f"Gemini API error: {e}")
             # Return fallback decision
             return self._get_fallback_decision(observation)
-    
-    def parse_llm_response(self, response_text: str, observation: dict) -> dict:
+        
+    def return_thoughts(self, response: Any) -> str:
+        """
+        Extract and return the model's thoughts from the response.
+        
+        Args:
+            response: Full response object from Gemini"""
+        thoughts = ""
+        for part in response.candidates[0].content.parts:
+            if part.thought:
+                thoughts += f"Model Thought:\n{part.text}\n"
+        return thoughts
+
+    def parse_llm_response(self, response_text: str, observation: dict, thoughts: str) -> dict:
         """
         Parse the LLM response into a structured decision.
         
@@ -411,7 +427,8 @@ thinking_budget=-1)
                 # Add default reasoning if missing
                 if 'reasoning' not in decision:
                     decision['reasoning'] = f"Chose {decision['action_type']} {decision['choice']}"
-                
+
+                decision['thoughts'] = thoughts
                 return decision
             
             else:
@@ -521,7 +538,7 @@ def get_gemini_decision(observation: dict, team_knowledge: Optional[dict] = None
                 "Gemini agent not initialized. Call init_gemini_agent() first "
                 "or set GOOGLE_AI_API_KEY environment variable"
             )
-    
+
     return _agent_instance.get_battle_decision(observation, team_knowledge)
 
 def parse_llm_response(response_text: str, observation: dict) -> Tuple[str, int, str]:

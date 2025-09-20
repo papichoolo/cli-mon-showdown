@@ -996,6 +996,17 @@ def _create_agent_observation(ai_req: dict, battle: Dict[str, BattleSide], ui: O
     # Check if this is a forced switch scenario
     is_forced_switch = bool((ai_req.get('forceSwitch') or [False])[0])
     
+    # Extract weather and terrain for clearer representation
+    weather = ai_req.get('weather', None)
+    field_conditions = ai_req.get('field', {})
+    
+    # Extract terrain specifically from field conditions if present
+    terrain = None
+    for key in field_conditions.keys():
+        if 'terrain' in key.lower():
+            terrain = key
+            break
+    
     # Create the complete observation
     observation = {
         'turn': current_turn,
@@ -1014,8 +1025,9 @@ def _create_agent_observation(ai_req: dict, battle: Dict[str, BattleSide], ui: O
         'can_move': bool(ai_req.get('active')) and not ai_req.get('wait'),
         'must_wait': bool(ai_req.get('wait')),
         'side_conditions': side_data.get('sideConditions', {}),
-        'field_conditions': ai_req.get('field', {}),
-        'weather': ai_req.get('weather'),
+        'field_conditions': field_conditions,
+        'weather': weather,
+        'terrain': terrain,
         'pseudoWeather': ai_req.get('pseudoWeather', [])
     }
     
@@ -1033,12 +1045,31 @@ def _llm_agent_decision(observation: dict, team_knowledge: Optional[dict] = None
         Dictionary with 'action_type' ('move' or 'switch') and 'choice' (index or move name)
     """
     debug_print(f"LLM agent making decision. Forced switch: {observation.get('is_forced_switch', False)}", "LLM_AGENT")
-    
+
+    # Compose a prompt for the LLM agent that includes the new conditions
+    prompt_context = (
+        f"Turn: {observation.get('turn')}\n"
+        f"Active Pokemon: {observation.get('active')}\n"
+        f"Bench: {observation.get('bench')}\n"
+        f"Opponent Active: {observation.get('opponent_active')}\n"
+        f"Recent Events: {observation.get('recent_events')}\n"
+        f"Available Moves: {observation.get('available_moves')}\n"
+        f"Available Switches: {observation.get('available_switches')}\n"
+        f"Is Forced Switch: {observation.get('is_forced_switch')}\n"
+        f"Can Move: {observation.get('can_move')}\n"
+        f"Must Wait: {observation.get('must_wait')}\n"
+        f"Side Conditions: {observation.get('side_conditions')}\n"
+        f"Field Conditions: {observation.get('field_conditions')}\n"
+        f"Weather: {observation.get('weather')}\n"
+        f"Terrain: {observation.get('terrain')}\n"
+        f"PseudoWeather: {observation.get('pseudoWeather')}\n"
+    )
+    debug_print(f"LLM agent prompt context:\n{prompt_context}", "LLM_AGENT_PROMPT")
+
     # Handle forced switch scenarios
     if observation.get('is_forced_switch', False):
         available_switches = observation.get('available_switches', [])
         if available_switches:
-            # For now, pick the first available switch (can be enhanced with LLM logic)
             choice = available_switches[0]['index']
             debug_print(f"LLM agent chose forced switch: {choice}", "LLM_AGENT")
             return {
@@ -1049,7 +1080,7 @@ def _llm_agent_decision(observation: dict, team_knowledge: Optional[dict] = None
         else:
             debug_print("LLM agent: No switches available for forced switch", "LLM_AGENT")
             return {'action_type': 'switch', 'choice': 1, 'reasoning': 'No valid switches available'}
-    
+
     # Handle wait scenarios (Pokemon can't move)
     if observation.get('must_wait', False):
         debug_print("LLM agent: Must wait, Pokemon cannot move", "LLM_AGENT")
@@ -1058,20 +1089,21 @@ def _llm_agent_decision(observation: dict, team_knowledge: Optional[dict] = None
             'choice': None,
             'reasoning': 'Pokemon cannot move this turn'
         }
-    
+
     # Normal turn decision making
     available_moves = observation.get('available_moves', [])
     available_switches = observation.get('available_switches', [])
-    
+
     # Try to use Gemini AI agent first
     try:
         if GEMINI_AVAILABLE:
             debug_print("Using Gemini AI agent for decision", "LLM_AGENT")
-            return get_gemini_decision(observation, team_knowledge)
+            decision = get_gemini_decision(observation, team_knowledge)
+            return decision
         else:
             debug_print("Gemini not available, using heuristic fallback", "LLM_AGENT")
             raise ImportError("Gemini agent not available")
-    
+
     except Exception as e:
         debug_print(f"LLM decision error: {e}, falling back to heuristic", "LLM_AGENT")
         # Fallback to simple logic if LLM fails
@@ -1079,23 +1111,23 @@ def _llm_agent_decision(observation: dict, team_knowledge: Optional[dict] = None
             # Simple heuristic: prefer moves with higher PP for sustainability
             best_move = None
             best_score = -1
-            
+
             for move in available_moves:
                 score = 0
                 pp = move.get('pp', 0)
                 max_pp = move.get('maxpp', 1)
-                
+
                 # Prefer moves with more PP remaining
                 if max_pp > 0:
                     score += (pp / max_pp) * 10
-                
+
                 # Add some randomness for variety
                 score += random.random() * 5
-                
+
                 if score > best_score:
                     best_score = score
                     best_move = move
-            
+
             if best_move:
                 debug_print(f"LLM agent chose move: {best_move['index']} ({best_move.get('move', 'unknown')})", "LLM_AGENT")
                 return {
@@ -1103,7 +1135,7 @@ def _llm_agent_decision(observation: dict, team_knowledge: Optional[dict] = None
                     'choice': best_move['index'],
                     'reasoning': f"Selected {best_move.get('move', 'move')} (PP: {best_move.get('pp', '?')}/{best_move.get('maxpp', '?')})"
                 }
-        
+
         # If no moves available, try to switch
         if available_switches:
             # Simple switch logic - pick a random healthy Pokemon
@@ -1114,7 +1146,7 @@ def _llm_agent_decision(observation: dict, team_knowledge: Optional[dict] = None
                 'choice': choice['index'],
                 'reasoning': f"Switching to {choice['species']} ({choice['hp_status']})"
             }
-    
+
     # Fallback - should rarely happen
     debug_print("LLM agent: No valid actions available", "LLM_AGENT")
     return {
@@ -1498,9 +1530,11 @@ def main():
     # Determine format for random battles
     battle_format = args.format
     if args.randbat:
-        if args.format == 'gen7ou':  # If default format is unchanged, switch to random
-            battle_format = 'gen7randombattle'
+        # if args.format == 'gen7ou':  # If default format is unchanged, switch to random
+        #     battle_format = 'gen7randombattle'
         debug_print(f"Random battle enabled. Using format: {battle_format}", "MAIN")
+    else:
+        debug_print(f"Using specified format: {battle_format}", "MAIN")
    
     # Pack teams or generate for randbat
     try:

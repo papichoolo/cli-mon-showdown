@@ -37,7 +37,7 @@ class GameWindow:
         self.enabled = enabled and sys.stdout.isatty()
         size = shutil.get_terminal_size(fallback=(80, 24))
         self.width = max(60, min(120, size.columns))
-        self.feed_lines = max(10, min(15, feed_lines))
+        self.feed_lines = max(15, min(25, feed_lines))  # Increased from 15 to 25 max lines
         self.feed: List[str] = []
         self.mounted = False
         self.last_render = ""  # Cache last render to avoid unnecessary redraws
@@ -87,11 +87,44 @@ class GameWindow:
         msg = msg.replace('\n', ' ').strip()
         if not msg:  # Skip empty messages
             return
-        if len(msg) > self.width - 4:
-            msg = msg[: self.width - 7] + '...'
-        # Avoid duplicates by checking recent messages
-        if msg not in self.feed[-5:]:  # Check last 5 messages for duplicates
-            self.feed.append(msg)
+        
+        # Wrap long messages instead of truncating
+        max_line_length = self.width - 4  # Account for border characters
+        if len(msg) > max_line_length:
+            # Split message into wrapped lines
+            words = msg.split(' ')
+            lines = []
+            current_line = ""
+            
+            for word in words:
+                # If adding this word would exceed the line length
+                if len(current_line) + len(word) + 1 > max_line_length:
+                    if current_line:  # If we have content in current line
+                        lines.append(current_line)
+                        current_line = word
+                    else:  # Single word is too long, truncate it
+                        lines.append(word[:max_line_length - 3] + '...')
+                        current_line = ""
+                else:
+                    if current_line:
+                        current_line += " " + word
+                    else:
+                        current_line = word
+            
+            # Add the last line if it has content
+            if current_line:
+                lines.append(current_line)
+            
+            # Add each wrapped line to the feed
+            for line in lines:
+                # Avoid duplicates by checking recent messages
+                if line not in self.feed[-5:]:
+                    self.feed.append(line)
+        else:
+            # Message fits in one line
+            if msg not in self.feed[-5:]:  # Check last 5 messages for duplicates
+                self.feed.append(msg)
+        
         # Keep only recent lines
         if len(self.feed) > 100:  # Reduce memory usage
             self.feed = self.feed[-100:]
@@ -105,7 +138,7 @@ class GameWindow:
         sys.stdout.flush()
         self.mounted = True
 
-    def render(self, battle: Dict[str, Dict[str, Optional[object]]], title: str = 'Pokemon Showdown CLI'):
+    def render(self, battle: Dict[str, Dict[str, Optional[object]]], title: str = 'CLI-Mon Showdown'):
         if not self.enabled:
             return
         

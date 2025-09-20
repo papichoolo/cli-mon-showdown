@@ -1,0 +1,17 @@
+# Include Pokemon Showdown source code in the package
+recursive-include pokemon-showdown *
+global-exclude *.pyc
+global-exclude __pycache__
+global-exclude .git*
+global-exclude pokemon-showdown/.git*
+prune pokemon-showdown/.git
+global-exclude node_modules/*
+global-exclude dist/*
+global-exclude build/*
+global-exclude .npm/*
+global-exclude .cache/*
+
+# Include license files
+include POKEMON_SHOWDOWN_LICENSE.txt
+include LICENSE
+include README.md

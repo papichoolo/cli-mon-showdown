@@ -2,15 +2,24 @@
 
 A terminal-based Pokémon battle CLI that drives the official Pokémon Showdown simulator for accurate mechanics, quick testing, and lightweight play.
 
-Note: You need a local clone of Pokémon Showdown. This repo expects it at `pokemon-showdown/` in the project root.
+**New in v0.1.6+: Pokemon Showdown source code is now included in the package!** No need for separate installation.
 
 ## Features
 
-- Accurate engine: uses the official Pokémon Showdown simulator
+- **Self-contained**: Pokemon Showdown simulator source code included in package
+- **Accurate engine**: uses the official Pokémon Showdown simulator
 - AI opponents: Gemini AI agent for strategic battle decisions
 - Teams: load Showdown import/export text files
 - CLI-first: fast feedback loop and readable battle feed
 - Random battles: generate teams via Showdown
+
+## Attribution
+
+This package includes the Pokemon Showdown source code, which is licensed under the MIT License:
+- **Copyright (c) 2011-2024 Guangcong Luo and other contributors** 
+- **Website**: http://pokemonshowdown.com/
+- **Repository**: https://github.com/smogon/pokemon-showdown
+- **License**: MIT License (see POKEMON_SHOWDOWN_LICENSE.txt)
 
 ## Project Structure
 
@@ -23,17 +32,20 @@ Note: You need a local clone of Pokémon Showdown. This repo expects it at `poke
 ## Requirements
 
 - Python 3.10+
-- Node.js 18+
-- A local checkout of `smogon/pokemon-showdown` (default path `pokemon-showdown/`)
+- Node.js 18+ (included with package)
+
+**Note**: Starting with v0.1.6, Pokemon Showdown source code is bundled with the package, so no separate installation is required!
 
 ## Quick Start
 
-### Install from PyPI (once published)
+### Install from PyPI (recommended)
 
 ```bash
 pip install cli-mon-showdown
 cli-mon --help
 ```
+
+**That's it!** Pokemon Showdown is now included - no additional setup required.
 
 ### Run from a local clone
 

@@ -3,7 +3,7 @@ requires = ["setuptools>=61,<70", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-# Explicitly disable automatic package discovery to prevent CI metadata issues
+# Include both our CLI package and Pokemon Showdown source
 packages = ["cli_mon_showdown"]
 package-dir = {"cli_mon_showdown" = "src/cli_mon_showdown"}
 include-package-data = true
@@ -12,8 +12,8 @@ zip-safe = false
 
 [project]
 name = "cli-mon-showdown"
-version = "0.1.5"
-description = "Command line interface for battling with a local Pokemon Showdown simulator"
+version = "0.1.6"
+description = "Command line interface for battling with a local Pokemon Showdown simulator - includes Pokemon Showdown source code"
 readme = "README.md"
 requires-python = ">=3.10"
 authors = [
@@ -23,7 +23,7 @@ dependencies = [
     "google-genai>=0.3.0",
     "pydantic>=2.5"
 ]
-keywords = ["pokemon", "showdown", "cli", "battle"]
+keywords = ["pokemon", "showdown", "cli", "battle", "simulator"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: End Users/Desktop",
@@ -33,7 +33,8 @@ classifiers = [
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Topic :: Games/Entertainment",
-    "Topic :: Utilities"
+    "Topic :: Utilities",
+    "License :: OSI Approved :: MIT License"
 ]
 
 [project.scripts]

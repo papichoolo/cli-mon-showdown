@@ -1,10 +1,9 @@
-name: Publish
+name: Publish to PyPI
 
 on:
   push:
     tags:
       - 'v*'
-  workflow_dispatch:
 
 permissions:
   contents: read
@@ -26,128 +25,24 @@ jobs:
       - name: Install build dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install --upgrade build twine setuptools wheel
-          echo "=== Installed versions ==="
-          python -m pip list | grep -E "(build|twine|setuptools|wheel)"
+          python -m pip install build twine
+          echo "Setuptools version:"
+          python -c "import setuptools; print(setuptools.__version__)"
 
-      - name: Debug project structure
+      - name: Build package
         run: |
-          echo "=== Current directory ==="
-          pwd
-          echo "=== Directory listing ==="
-          ls -la
-          echo "=== Source directory ==="
-          ls -la src/ || echo "No src directory"
-          echo "=== Package directory ==="
-          ls -la src/cli_mon_showdown/ || echo "No package directory"
-          echo "=== pyproject.toml content ==="
-          cat pyproject.toml
-          echo "=== Test metadata parsing ==="
-          python -c "
-          import tomllib
-          with open('pyproject.toml', 'rb') as f:
-              data = tomllib.load(f)
-              project = data.get('project', {})
-              print(f'Project name from pyproject.toml: {project.get(\"name\")}')
-              print(f'Project version from pyproject.toml: {project.get(\"version\")}')
-              print(f'Build system: {data.get(\"build-system\", {})}')
-          "
-
-      - name: Build sdist and wheel
-        run: |
-          echo "=== Building package ==="
-          python -m build --verbose
-          echo "=== Build artifacts ==="
+          python -m build
+          echo "Generated files:"
           ls -la dist/
-          echo "=== Setuptools version ==="
-          python -c "import setuptools; print(f'setuptools: {setuptools.__version__}')"
-          echo "=== Check setuptools metadata generation ==="
-          python -c "
-          import setuptools.build_meta as build_meta
-          from pathlib import Path
-          import os
-          try:
-              metadata = build_meta.get_requires_for_build_wheel()
-              print('Build wheel requirements:', metadata)
-              Path('temp_metadata').mkdir(exist_ok=True)
-              metadata_path = build_meta.prepare_metadata_for_build_wheel('temp_metadata')
-              print('Metadata prepared at:', metadata_path)
-              if Path(metadata_path).exists():
-                  for f in os.listdir(metadata_path):
-                      print(f'Metadata file: {f}')
-                      if f.endswith('.dist-info'):
-                          info_dir = Path(metadata_path) / f
-                          if info_dir.is_dir():
-                              for info_file in info_dir.iterdir():
-                                  print(f'  {info_file.name}')
-                                  if info_file.name == 'METADATA':
-                                      content = info_file.read_text()
-                                      print(f'  Content preview: {content[:300]}')
-                                      print(f'  Has Name: {\"Name:\" in content}')
-                                      print(f'  Has Version: {\"Version:\" in content}')
-          except Exception as e:
-              print(f'Metadata generation test failed: {e}')
-              import traceback
-              traceback.print_exc()
-          "
-          echo "=== Examine actual built wheel ==="
-          python -c "
-          import zipfile
-          import os
-          for f in os.listdir('dist'):
-              if f.endswith('.whl'):
-                  print(f'=== Examining {f} ===')
-                  try:
-                      with zipfile.ZipFile(f'dist/{f}') as z:
-                          files = z.namelist()
-                          print('All files in wheel:', files)
-                          metadata_files = [n for n in files if 'METADATA' in n or 'PKG-INFO' in n]
-                          print('Metadata files found:', metadata_files)
-                          for mf in metadata_files:
-                              print(f'--- Content of {mf} ---')
-                              content = z.read(mf).decode('utf-8')
-                              print(content[:500])
-                  except Exception as e:
-                      print(f'Error examining wheel: {e}')
-          "
 
-      - name: Verify artifacts
+      - name: Check distribution
         run: |
-          echo "=== Checking package contents ==="
-          python -m twine check dist/* || {
-            echo "Twine check failed! Investigating..."
-            python -c "
-            import zipfile
-            import os
-            for f in os.listdir('dist'):
-                if f.endswith('.whl'):
-                    print(f'=== Investigating {f} ===')
-                    try:
-                        with zipfile.ZipFile(f'dist/{f}') as z:
-                            print('Files in wheel:', z.namelist())
-                            metadata_files = [n for n in z.namelist() if 'METADATA' in n or 'PKG-INFO' in n]
-                            for mf in metadata_files:
-                                print(f'--- {mf} content ---')
-                                content = z.read(mf).decode('utf-8')
-                                print(content[:1000])
-                                if 'Name:' not in content and 'name:' not in content.lower():
-                                    print('ERROR: No Name field found!')
-                                if 'Version:' not in content and 'version:' not in content.lower():
-                                    print('ERROR: No Version field found!')
-                    except Exception as e:
-                        print(f'Error reading wheel: {e}')
-            "
-            exit 1
-          }
-          echo "=== Package contents ==="
-          python -m tarfile -l dist/*.tar.gz || true
+          python -m twine check dist/*
 
       - name: Test installation
         run: |
-          echo "=== Testing package installation ==="
           pip install dist/*.whl
-          echo "=== Testing CLI entry point ==="
-          cli-mon --help || echo "CLI entry point test failed"
+          cli-mon --help
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@v1.8.14

@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=69", "wheel"]
+requires = ["setuptools>=61,<70", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
@@ -7,6 +7,8 @@ build-backend = "setuptools.build_meta"
 packages = ["cli_mon_showdown"]
 package-dir = {"cli_mon_showdown" = "src/cli_mon_showdown"}
 include-package-data = true
+# Force older metadata version for compatibility
+zip-safe = false
 
 [project]
 name = "cli-mon-showdown"

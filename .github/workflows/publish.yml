@@ -36,10 +36,14 @@ jobs:
           # Copy built files and essential directories
           cp pokemon-showdown/pokemon-showdown src/cli_mon_showdown/pokemon-showdown/
           cp pokemon-showdown/package.json src/cli_mon_showdown/pokemon-showdown/
+          cp pokemon-showdown/build src/cli_mon_showdown/pokemon-showdown/
           cp -r pokemon-showdown/dist src/cli_mon_showdown/pokemon-showdown/
           cp -r pokemon-showdown/data src/cli_mon_showdown/pokemon-showdown/
           cp -r pokemon-showdown/lib src/cli_mon_showdown/pokemon-showdown/
-          # Skip large unnecessary directories: server, test, tools, translations, config, logs, node_modules
+          # Copy node_modules for runtime dependencies (excluding dev dependencies)
+          mkdir -p src/cli_mon_showdown/pokemon-showdown/node_modules
+          cp -r pokemon-showdown/node_modules/* src/cli_mon_showdown/pokemon-showdown/node_modules/ || echo "Some node_modules may have failed to copy"
+          # Skip large unnecessary directories: server, test, tools, translations, config, logs
           echo "Pokemon Showdown built and essentials copied to package directory"
           du -sh src/cli_mon_showdown/pokemon-showdown/
           ls -la src/cli_mon_showdown/pokemon-showdown/

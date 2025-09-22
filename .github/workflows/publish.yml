@@ -25,7 +25,9 @@ jobs:
       - name: Clone Pokemon Showdown
         run: |
           git clone https://github.com/smogon/pokemon-showdown.git
-          mv pokemon-showdown src/
+          mv pokemon-showdown src/cli_mon_showdown/pokemon-showdown
+          echo "Pokemon Showdown cloned to package directory"
+          ls -la src/cli_mon_showdown/pokemon-showdown/
 
       - name: Set up Python
         uses: actions/setup-python@v5

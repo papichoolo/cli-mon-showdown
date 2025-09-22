@@ -1,6 +1,6 @@
 include README.md
 include LICENSE
 include requirements.txt
-recursive-include src/pokemon-showdown *
-recursive-exclude src/pokemon-showdown *.git*
-recursive-exclude src/pokemon-showdown node_modules *
+recursive-include src/cli_mon_showdown/pokemon-showdown *
+global-exclude src/cli_mon_showdown/pokemon-showdown/.git*
+global-exclude src/cli_mon_showdown/pokemon-showdown/node_modules

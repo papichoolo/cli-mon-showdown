@@ -17,7 +17,8 @@ def get_pokemon_showdown_path():
     # Possible paths to check (in order of preference)
     possible_paths = [
         current_dir / "pokemon-showdown",  # Development environment
-        package_dir / ".." / "pokemon-showdown",  # Package installation
+        package_dir / "pokemon-showdown",  # Package installation (new location)
+        package_dir / ".." / "pokemon-showdown",  # Package installation (old location)
         current_dir / "src" / "pokemon-showdown",  # Alternative layout
         package_dir / ".." / ".." / "pokemon-showdown",  # Another alternative
     ]

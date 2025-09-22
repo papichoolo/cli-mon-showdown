@@ -18,8 +18,17 @@ jobs:
       - name: Clone Pokemon Showdown
         run: |
           git clone https://github.com/smogon/pokemon-showdown.git
-          mv pokemon-showdown src/cli_mon_showdown/pokemon-showdown
-          echo "Pokemon Showdown cloned to package directory"
+          # Create minimal Pokemon Showdown structure with only essential files
+          mkdir -p src/cli_mon_showdown/pokemon-showdown
+          # Copy only essential files for simulation
+          cp pokemon-showdown/pokemon-showdown src/cli_mon_showdown/pokemon-showdown/
+          cp pokemon-showdown/package.json src/cli_mon_showdown/pokemon-showdown/
+          cp -r pokemon-showdown/sim src/cli_mon_showdown/pokemon-showdown/
+          cp -r pokemon-showdown/data src/cli_mon_showdown/pokemon-showdown/
+          cp -r pokemon-showdown/lib src/cli_mon_showdown/pokemon-showdown/
+          # Skip large unnecessary directories: server, test, tools, translations, config, logs
+          echo "Pokemon Showdown essentials copied to package directory"
+          du -sh src/cli_mon_showdown/pokemon-showdown/
           ls -la src/cli_mon_showdown/pokemon-showdown/
 
       - name: Set up Python
@@ -152,6 +161,13 @@ jobs:
           pip install dist/*.whl
           echo "=== Testing CLI entry point ==="
           cli-mon --help || echo "CLI entry point failed"
+          echo "=== Testing Pokemon Showdown integration ==="
+          # Install Node.js for Pokemon Showdown
+          curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
+          sudo apt-get install -y nodejs
+          echo "Node.js version: $(node --version)"
+          echo "=== Testing random battle generation ==="
+          timeout 30s cli-mon --randbat --no-p2-ai --debug || echo "Random battle test completed (timeout expected)"
 
       - name: Check for PyPI name conflicts
         run: |

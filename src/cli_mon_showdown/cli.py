@@ -770,8 +770,12 @@ def _process_output(out_lines, humanize: bool, active_side: str, requests: Dict[
     # Return winner and whether a player error was detected
     return winner, player_error_detected, current_turn
 
-def pack_team(path: str, formatname: str = "gen7ou", ps_path: str = "pokemon-showdown") -> str:
+def pack_team(path: str, formatname: str = "gen7ou", ps_path: str = None) -> str:
     import os
+    from . import get_pokemon_showdown_path
+    
+    if ps_path is None:
+        ps_path = get_pokemon_showdown_path()
     
     # First check if the team file exists
     if not os.path.exists(path):

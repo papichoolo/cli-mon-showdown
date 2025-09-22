@@ -22,6 +22,11 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Clone Pokemon Showdown
+        run: |
+          git clone https://github.com/smogon/pokemon-showdown.git
+          mv pokemon-showdown src/
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:

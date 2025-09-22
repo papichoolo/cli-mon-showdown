@@ -9,8 +9,18 @@ def debug_print(message, category="DEBUG"):
     if DEBUG:
         print(f"[{category}] {message}")
 
+def _get_default_ps_path():
+    """Get the default Pokemon Showdown path."""
+    try:
+        from . import get_pokemon_showdown_path
+        return get_pokemon_showdown_path()
+    except ImportError:
+        return "pokemon-showdown"
+
 class ShowdownWrapper:
-    def __init__(self, ps_path="pokemon-showdown", formatid="gen7ou"):
+    def __init__(self, ps_path=None, formatid="gen7ou"):
+        if ps_path is None:
+            ps_path = _get_default_ps_path()
         debug_print(f"Initializing ShowdownWrapper with path: {ps_path}, format: {formatid}", "WRAPPER")
         try:
             self.proc = subprocess.Popen(
@@ -117,8 +127,10 @@ class ShowdownWrapper:
         except Exception:
             pass
 
-def generate_random_team(ps_path="pokemon-showdown", formatid="gen7randombattle"):
+def generate_random_team(ps_path=None, formatid="gen7randombattle"):
     """Generates a random team for the given format."""
+    if ps_path is None:
+        ps_path = _get_default_ps_path()
     try:
         result = subprocess.run(
             ["node", f"{ps_path}/pokemon-showdown", "generate-team", formatid],

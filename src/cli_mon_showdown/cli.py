@@ -1572,9 +1572,12 @@ def init(gemini_api_key=None):
     print(f"Changing directory to: {ps_dir}")
     os.chdir(ps_dir)
     
+    # Use shell=True on Windows to handle command resolution properly
+    shell_mode = sys.platform == "win32"
+    
     # Check if Node.js is available
     try:
-        result = subprocess.run(["node", "--version"], capture_output=True, text=True, check=True)
+        result = subprocess.run(["node", "--version"], capture_output=True, text=True, check=True, shell=shell_mode)
         print(f"Node.js version: {result.stdout.strip()}")
     except (subprocess.CalledProcessError, FileNotFoundError):
         print("Error: Node.js not found. Please install Node.js and ensure it's in your PATH.")
@@ -1582,7 +1585,6 @@ def init(gemini_api_key=None):
     
     # Check if npm is available (handle Windows shell differences)
     npm_cmd = "npm"
-    shell_mode = sys.platform == "win32"  # Use shell=True on Windows
     
     try:
         result = subprocess.run([npm_cmd, "--version"], capture_output=True, text=True, check=True, shell=shell_mode)

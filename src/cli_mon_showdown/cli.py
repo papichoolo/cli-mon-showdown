@@ -1517,6 +1517,99 @@ def _show_pokemon_showdown_menu(req: dict, battle: Dict[str, BattleSide], active
         except (ValueError, KeyboardInterrupt):
             raise  # Re-raise KeyboardInterrupt to handle gracefully in main loop
 
+def init(gemini_api_key=None):
+    """Initialize Pokemon Showdown Node.js dependencies and optionally set up Gemini API key."""
+    import os
+    import subprocess
+    import sys
+    from pathlib import Path
+    
+    # Set up Gemini API key if provided
+    if gemini_api_key:
+        os.environ['GEMINI_API_KEY'] = gemini_api_key
+        print(f"✅ Gemini API key configured!")
+        
+        # Test Gemini initialization if available
+        if GEMINI_AVAILABLE:
+            try:
+                init_gemini_agent(gemini_api_key)
+                print("✅ Gemini AI agent initialized successfully!")
+            except Exception as e:
+                print(f"⚠️ Warning: Failed to initialize Gemini agent: {e}")
+        else:
+            print("⚠️ Note: Gemini agent dependencies not available. AI features will not work.")
+    else:
+        # Check if API key is already set in environment
+        existing_key = os.getenv('GOOGLE_AI_API_KEY') or os.getenv('GEMINI_API_KEY')
+        if existing_key:
+            print("✅ Gemini API key found in environment variables!")
+        else:
+            print("💡 Tip: You can set a Gemini API key with: cli-mon --init --gemini-api-key YOUR_KEY")
+    
+    print("\n🔧 Setting up Pokemon Showdown dependencies...")
+    
+    try:
+        from . import get_pokemon_showdown_path
+        ps_path = get_pokemon_showdown_path()
+    except ImportError:
+        print("Error: Unable to locate Pokemon Showdown installation.")
+        sys.exit(1)
+    
+    print(f"Pokemon Showdown path: {ps_path}")
+    ps_dir = Path(ps_path)
+    
+    if not ps_dir.exists():
+        print(f"Error: Pokemon Showdown directory not found at {ps_path}")
+        print("Please ensure the package is properly installed.")
+        sys.exit(1)
+    
+    package_json = ps_dir / "package.json"
+    if not package_json.exists():
+        print(f"Error: package.json not found at {package_json}")
+        print("The Pokemon Showdown installation appears to be incomplete.")
+        sys.exit(1)
+    
+    print(f"Changing directory to: {ps_dir}")
+    os.chdir(ps_dir)
+    
+    # Check if Node.js is available
+    try:
+        result = subprocess.run(["node", "--version"], capture_output=True, text=True, check=True)
+        print(f"Node.js version: {result.stdout.strip()}")
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        print("Error: Node.js not found. Please install Node.js and ensure it's in your PATH.")
+        sys.exit(1)
+    
+    # Check if npm is available
+    try:
+        result = subprocess.run(["npm", "--version"], capture_output=True, text=True, check=True)
+        print(f"npm version: {result.stdout.strip()}")
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        print("Error: npm not found. Please install npm and ensure it's in your PATH.")
+        sys.exit(1)
+    
+    print("Installing Pokemon Showdown dependencies...")
+    try:
+        subprocess.run(["npm", "install"], check=True)
+        print("✅ Dependencies installed successfully!")
+    except subprocess.CalledProcessError as e:
+        print(f"Error installing dependencies: {e}")
+        sys.exit(1)
+    
+    print("Building Pokemon Showdown...")
+    try:
+        subprocess.run(["node", "build"], check=True)
+        print("✅ Build completed successfully!")
+    except subprocess.CalledProcessError as e:
+        print(f"Error building Pokemon Showdown: {e}")
+        sys.exit(1)
+    
+    print("\n🎉 Pokemon Showdown setup complete!")
+    print("You can now use cli-mon for battles:")
+    print("  cli-mon --randbat")
+    print("  cli-mon teams/p1.txt teams/p2.txt")
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("p1", nargs='?', default=None, help="Path to Player 1 team file (Showdown importable)")
@@ -1540,11 +1633,18 @@ def main():
     parser.add_argument("--no-window", dest="window", action="store_false",
                         help="Disable the in-terminal game window")
     parser.add_argument("--debug", action="store_true", help="Enable debug printing.")
+    parser.add_argument("--init", action="store_true", help="Initialize Pokemon Showdown Node.js dependencies and exit.")
+    parser.add_argument("--gemini-api-key", help="Set Gemini API key for AI agent features (used with --init).")
     parser.set_defaults(p2_ai=True, humanize=True, window=True)
     args = parser.parse_args()
 
     if args.debug:
         showdown_wrapper.DEBUG = True
+    
+    # Handle init-node command early and exit
+    if args.init:
+        init(gemini_api_key=getattr(args, 'gemini_api_key', None))
+        return
     
     debug_print("Starting improved CLI battle interface", "MAIN")
     debug_print(f"Command line args parsed: {args}", "MAIN")

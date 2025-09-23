@@ -33,14 +33,11 @@ Note: You need a local clone of Pokémon Showdown. This repo expects it at `poke
 ```bash
 pip install cli-mon-showdown
 
-# After installation, you need to set up Pokemon Showdown dependencies
-# Find where the package was installed
-python -c "import cli_mon_showdown; print(cli_mon_showdown.get_pokemon_showdown_path())"
+# After installation, set up Pokemon Showdown dependencies with one command
+cli-mon --init
 
-# Navigate to that directory and install dependencies
-cd "path-shown-above"
-npm install
-node build
+# Optional: Set up Gemini AI agent with your API key
+cli-mon --init --gemini-api-key YOUR_GEMINI_API_KEY
 
 # Now you can use the CLI
 cli-mon --help

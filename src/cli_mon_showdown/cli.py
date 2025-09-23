@@ -1580,17 +1580,24 @@ def init(gemini_api_key=None):
         print("Error: Node.js not found. Please install Node.js and ensure it's in your PATH.")
         sys.exit(1)
     
-    # Check if npm is available
+    # Check if npm is available (handle Windows shell differences)
+    npm_cmd = "npm"
+    shell_mode = sys.platform == "win32"  # Use shell=True on Windows
+    
     try:
-        result = subprocess.run(["npm", "--version"], capture_output=True, text=True, check=True)
+        result = subprocess.run([npm_cmd, "--version"], capture_output=True, text=True, check=True, shell=shell_mode)
         print(f"npm version: {result.stdout.strip()}")
     except (subprocess.CalledProcessError, FileNotFoundError):
-        print("Error: npm not found. Please install npm and ensure it's in your PATH.")
+        if sys.platform == "win32":
+            print("Error: npm not found. Please ensure npm is installed and restart your terminal.")
+            print("If you just installed Node.js/npm, you may need to restart your terminal or system.")
+        else:
+            print("Error: npm not found. Please install npm and ensure it's in your PATH.")
         sys.exit(1)
     
     print("Installing Pokemon Showdown dependencies...")
     try:
-        subprocess.run(["npm", "install"], check=True)
+        subprocess.run([npm_cmd, "install"], check=True, shell=shell_mode)
         print("✅ Dependencies installed successfully!")
     except subprocess.CalledProcessError as e:
         print(f"Error installing dependencies: {e}")
@@ -1598,7 +1605,7 @@ def init(gemini_api_key=None):
     
     print("Building Pokemon Showdown...")
     try:
-        subprocess.run(["node", "build"], check=True)
+        subprocess.run(["node", "build"], check=True, shell=shell_mode)
         print("✅ Build completed successfully!")
     except subprocess.CalledProcessError as e:
         print(f"Error building Pokemon Showdown: {e}")

@@ -31,16 +31,19 @@ jobs:
           echo "Building Pokemon Showdown..."
           node build
           cd ..
-          # Copy ALL Pokemon Showdown files (excluding only git and some dev files)
+          # Copy ALL Pokemon Showdown files (excluding platform-specific node_modules and dev files)
           mkdir -p src/cli_mon_showdown/pokemon-showdown
           echo "Copying all Pokemon Showdown files to package directory..."
           cp -r pokemon-showdown/* src/cli_mon_showdown/pokemon-showdown/ 2>/dev/null || true
+          # Remove platform-specific node_modules to avoid esbuild platform conflicts
+          rm -rf src/cli_mon_showdown/pokemon-showdown/node_modules 2>/dev/null || true
           # Remove .git directory if it was copied
           rm -rf src/cli_mon_showdown/pokemon-showdown/.git 2>/dev/null || true
           # Remove some large development files that aren't needed for runtime
           rm -rf src/cli_mon_showdown/pokemon-showdown/.github 2>/dev/null || true
           rm -rf src/cli_mon_showdown/pokemon-showdown/test 2>/dev/null || true
-          echo "All Pokemon Showdown files copied to package directory"
+          # Keep package.json for users to install dependencies locally
+          echo "Pokemon Showdown files copied (excluding platform-specific node_modules)"
           du -sh src/cli_mon_showdown/pokemon-showdown/
           echo "Directory structure:"
           find src/cli_mon_showdown/pokemon-showdown/ -maxdepth 2 -type d | head -20

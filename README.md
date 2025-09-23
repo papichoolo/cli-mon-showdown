@@ -28,12 +28,25 @@ Note: You need a local clone of Pokémon Showdown. This repo expects it at `poke
 
 ## Quick Start
 
-### Install from PyPI (once published)
+### Install from PyPI
 
 ```bash
 pip install cli-mon-showdown
+
+# After installation, you need to set up Pokemon Showdown dependencies
+# Find where the package was installed
+python -c "import cli_mon_showdown; print(cli_mon_showdown.get_pokemon_showdown_path())"
+
+# Navigate to that directory and install dependencies
+cd "path-shown-above"
+npm install
+node build
+
+# Now you can use the CLI
 cli-mon --help
 ```
+
+**Note**: When installing from PyPI, Pokemon Showdown files are included but Node.js dependencies are not installed by default to avoid platform conflicts. You need to run `npm install` in the Pokemon Showdown directory after installation.
 
 ### Run from a local clone
 

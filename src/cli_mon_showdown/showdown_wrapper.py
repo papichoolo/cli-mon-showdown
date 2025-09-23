@@ -2,6 +2,8 @@ import subprocess
 import threading
 import queue
 import time
+import os
+from pathlib import Path
 
 DEBUG = False
 
@@ -17,11 +19,84 @@ def _get_default_ps_path():
     except ImportError:
         return "pokemon-showdown"
 
+def _check_pokemon_showdown_setup(ps_path):
+    """Check if Pokemon Showdown is properly set up with dependencies."""
+    ps_dir = Path(ps_path)
+    
+    # Check if pokemon-showdown executable exists
+    ps_executable = ps_dir / "pokemon-showdown"
+    if not ps_executable.exists():
+        raise FileNotFoundError(
+            f"Pokemon Showdown executable not found at {ps_executable}. "
+            "Please ensure Pokemon Showdown is properly installed."
+        )
+    
+    # Check if node_modules exists
+    node_modules = ps_dir / "node_modules"
+    if not node_modules.exists():
+        package_json = ps_dir / "package.json"
+        if package_json.exists():
+            raise RuntimeError(
+                f"Pokemon Showdown dependencies not installed. "
+                f"Please run 'npm install' in the directory: {ps_dir}\n"
+                f"Commands to run:\n"
+                f"  cd {ps_dir}\n"
+                f"  npm install\n"
+                f"  node build"
+            )
+        else:
+            raise FileNotFoundError(
+                f"Pokemon Showdown package.json not found at {package_json}. "
+                "Please ensure Pokemon Showdown is properly installed."
+            )
+    
+    # Check if esbuild is installed with the right platform
+    esbuild_dir = node_modules / "esbuild"
+    if esbuild_dir.exists():
+        # Try to detect platform-specific esbuild issues
+        import platform
+        system = platform.system().lower()
+        arch = platform.machine().lower()
+        
+        if system == "windows":
+            expected_platform = "win32"
+        elif system == "darwin":
+            expected_platform = "darwin"
+        else:
+            expected_platform = "linux"
+            
+        if arch in ["x86_64", "amd64"]:
+            expected_arch = "x64"
+        elif arch == "aarch64":
+            expected_arch = "arm64"
+        else:
+            expected_arch = arch
+            
+        expected_esbuild = node_modules / f"@esbuild" / f"{expected_platform}-{expected_arch}"
+        if not expected_esbuild.exists():
+            raise RuntimeError(
+                f"esbuild platform mismatch detected. Expected {expected_platform}-{expected_arch} but not found.\n"
+                f"This happens when node_modules was installed on a different platform.\n"
+                f"Please run the following commands to fix this:\n"
+                f"  cd {ps_dir}\n"
+                f"  rm -rf node_modules\n"
+                f"  npm install\n"
+                f"  node build"
+            )
+
 class ShowdownWrapper:
     def __init__(self, ps_path=None, formatid="gen7ou"):
         if ps_path is None:
             ps_path = _get_default_ps_path()
         debug_print(f"Initializing ShowdownWrapper with path: {ps_path}, format: {formatid}", "WRAPPER")
+        
+        # Check Pokemon Showdown setup before proceeding
+        try:
+            _check_pokemon_showdown_setup(ps_path)
+        except (FileNotFoundError, RuntimeError) as e:
+            debug_print(f"Pokemon Showdown setup error: {e}", "WRAPPER")
+            raise
+        
         try:
             self.proc = subprocess.Popen(
                 ["node", f"{ps_path}/pokemon-showdown", "simulate-battle"],
@@ -131,6 +206,15 @@ def generate_random_team(ps_path=None, formatid="gen7randombattle"):
     """Generates a random team for the given format."""
     if ps_path is None:
         ps_path = _get_default_ps_path()
+    
+    # Check Pokemon Showdown setup before proceeding
+    try:
+        _check_pokemon_showdown_setup(ps_path)
+    except (FileNotFoundError, RuntimeError) as e:
+        debug_print(f"Error generating random team: {e}", "WRAPPER")
+        print(f"Error: Failed to generate random teams.\n{e}")
+        return None
+    
     try:
         result = subprocess.run(
             ["node", f"{ps_path}/pokemon-showdown", "generate-team", formatid],

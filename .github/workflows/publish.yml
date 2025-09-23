@@ -31,22 +31,19 @@ jobs:
           echo "Building Pokemon Showdown..."
           node build
           cd ..
-          # Create minimal Pokemon Showdown structure with essential files
+          # Copy ALL Pokemon Showdown files (excluding only git and some dev files)
           mkdir -p src/cli_mon_showdown/pokemon-showdown
-          # Copy built files and essential directories
-          cp pokemon-showdown/pokemon-showdown src/cli_mon_showdown/pokemon-showdown/
-          cp pokemon-showdown/package.json src/cli_mon_showdown/pokemon-showdown/
-          cp pokemon-showdown/build src/cli_mon_showdown/pokemon-showdown/
-          cp -r pokemon-showdown/dist src/cli_mon_showdown/pokemon-showdown/
-          cp -r pokemon-showdown/data src/cli_mon_showdown/pokemon-showdown/
-          cp -r pokemon-showdown/lib src/cli_mon_showdown/pokemon-showdown/
-          # Copy node_modules for runtime dependencies (excluding dev dependencies)
-          mkdir -p src/cli_mon_showdown/pokemon-showdown/node_modules
-          cp -r pokemon-showdown/node_modules/* src/cli_mon_showdown/pokemon-showdown/node_modules/ || echo "Some node_modules may have failed to copy"
-          # Skip large unnecessary directories: server, test, tools, translations, config, logs
-          echo "Pokemon Showdown built and essentials copied to package directory"
+          echo "Copying all Pokemon Showdown files to package directory..."
+          cp -r pokemon-showdown/* src/cli_mon_showdown/pokemon-showdown/ 2>/dev/null || true
+          # Remove .git directory if it was copied
+          rm -rf src/cli_mon_showdown/pokemon-showdown/.git 2>/dev/null || true
+          # Remove some large development files that aren't needed for runtime
+          rm -rf src/cli_mon_showdown/pokemon-showdown/.github 2>/dev/null || true
+          rm -rf src/cli_mon_showdown/pokemon-showdown/test 2>/dev/null || true
+          echo "All Pokemon Showdown files copied to package directory"
           du -sh src/cli_mon_showdown/pokemon-showdown/
-          ls -la src/cli_mon_showdown/pokemon-showdown/
+          echo "Directory structure:"
+          find src/cli_mon_showdown/pokemon-showdown/ -maxdepth 2 -type d | head -20
 
       - name: Set up Python
         uses: actions/setup-python@v5

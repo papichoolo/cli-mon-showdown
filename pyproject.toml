@@ -15,7 +15,7 @@ cli_mon_showdown = ["pokemon-showdown/**/*"]
 
 [project]
 name = "cli-mon-showdown"
-version = "0.1.12"
+version = "0.1.13"
 description = "Command line interface for battling with a local Pokemon Showdown simulator"
 readme = "README.md"
 requires-python = ">=3.10"

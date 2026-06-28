@@ -1,7 +1,7 @@
 # Dependencies
 pokemon-showdown/
 node_modules/
-
+*.json
 # Python
 .venv/
 __pycache__/

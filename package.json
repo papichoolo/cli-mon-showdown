@@ -13,6 +13,7 @@
   "dependencies": {
     "@pkmn/dex": "^0.9.38",
     "@pkmn/sets": "^5.2.0",
-    "@pkmn/sim": "^0.9.38"
+    "@pkmn/sim": "^0.9.38",
+    "@smogon/calc": "^0.11.0"
   }
 }

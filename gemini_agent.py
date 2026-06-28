@@ -5,68 +5,169 @@ This module provides an interface to Google's Gemini API for making strategic
 Pokemon battle decisions based on game state observations.
 """
 
-#import chunk
 import json
 import os
-from typing import Dict, Optional, Tuple, Any
-from google import genai
+from typing import Dict, Optional, Tuple, Any, List, TypedDict, Literal
 from pydantic import BaseModel, Field
-#from google.generativeai.types import HarmCategory, HarmBlockThreshold
-from google.genai import types
+import subprocess
+import re
+from dotenv import load_dotenv
+import showdown_wrapper
 
-class ModelAction(BaseModel):
-    action_type: str = Field(..., description="Either 'move' or 'switch'")
-    choice: int = Field(..., description="Index of the move (1-4) or Pokemon slot (1-6)")
-    reasoning: Optional[str] = Field(None, description="Brief explanation of the choice")
+# Load environment variables from .env file
+load_dotenv()
 
+# For Langchain OpenRouter as requested
+try:
+    from langchain.agents import create_agent
+except ImportError:
+    pass
+from langchain_openrouter import ChatOpenRouter
+from langchain_core.tools import tool
+
+class OpponentKnowledge(TypedDict):
+    active_pokemon: str
+    team: Dict[str, dict]
+
+class DecisionInput(BaseModel):
+    """Input for submitting a battle decision."""
+    action_type: Literal["move", "switch"] = Field(description="Either 'move' or 'switch'")
+    choice: int = Field(description="Index of the move (1-4) or Pokemon slot (1-6)")
+    reasoning: str = Field(description="Brief explanation of the choice")
+
+@tool(args_schema=DecisionInput)
+def submit_decision(action_type: str, choice: int, reasoning: str) -> str:
+    """Submit your Pokemon battle decision for the current turn.
+    action_type: Either 'move' or 'switch'.
+    choice: Index of the move (1-4) or Pokemon slot (1-6).
+    reasoning: Brief explanation of the choice.
+    """
+    return json.dumps({
+        "action_type": action_type,
+        "choice": choice,
+        "reasoning": reasoning
+    })
+
+def update_tracker(raw_log: str, current_knowledge: dict) -> tuple[dict, str]:
+    """Parses raw showdown log, updates opponent knowledge, and compacts the log."""
+    compact_log = []
+    
+    for line in raw_log.split('\n'):
+        if line.startswith('|move|p1a:'):
+            parts = line.split('|')
+            if len(parts) >= 4:
+                pokemon_raw = parts[2].split(': ')[1] if ': ' in parts[2] else parts[2]
+                move = parts[3]
+                if pokemon_raw not in current_knowledge['team']:
+                    current_knowledge['team'][pokemon_raw] = {"moves": set(), "item": "Unknown"}
+                current_knowledge['team'][pokemon_raw]['moves'].add(move)
+                compact_log.append(f"Opponent {pokemon_raw} used {move}.")
+                
+        elif line.startswith('|switch|p1a:') or line.startswith('|drag|p1a:'):
+            parts = line.split('|')
+            if len(parts) >= 4:
+                pokemon_raw = parts[3].split(',')[0]
+                current_knowledge['active_pokemon'] = pokemon_raw
+                if pokemon_raw not in current_knowledge['team']:
+                    current_knowledge['team'][pokemon_raw] = {"moves": set(), "item": "Unknown"}
+                compact_log.append(f"Opponent switched to {pokemon_raw}.")
+                
+    return current_knowledge, "\n".join(compact_log)
+
+class DamageCalcInput(BaseModel):
+    """Input for damage calculation."""
+    gen: int = Field(description="Generation number, usually 9")
+    attacker_name: str = Field(description="Name of attacking Pokemon")
+    defender_name: str = Field(description="Name of defending Pokemon")
+    move_name: str = Field(description="Name of the move")
+
+@tool(args_schema=DamageCalcInput)
+def calculate_damage(gen: int, attacker_name: str, defender_name: str, move_name: str) -> str:
+    """Calculates potential damage range for a given move."""
+    payload = {
+        "gen": gen,
+        "attacker": {"name": attacker_name, "details": {}},
+        "defender": {"name": defender_name, "details": {}},
+        "move": move_name
+    }
+    
+    result = subprocess.run(
+        ['node', 'calc_wrapper.js', json.dumps(payload)],
+        capture_output=True,
+        text=True
+    )
+    
+    if result.returncode != 0:
+        return f"Calculation failed: Missing data or invalid inputs. {result.stderr}"
+        
+    try:
+        data = json.loads(result.stdout)
+        return f"Range: {data['damage_range']}. Summary: {data['description']}"
+    except Exception as e:
+        return f"Failed to parse calc output: {e}"
+
+def _run_calc(attacker_name: str, defender_name: str, move_name: str) -> str:
+    """Fast, internal damage calculation without going through Langchain tools."""
+    try:
+        payload = {
+            "gen": 9,
+            "attacker": {"name": attacker_name, "details": {}},
+            "defender": {"name": defender_name, "details": {}},
+            "move": move_name
+        }
+        result = subprocess.run(
+            ['node', 'calc_wrapper.js', json.dumps(payload)],
+            capture_output=True,
+            text=True
+        )
+        if result.returncode == 0:
+            data = json.loads(result.stdout)
+            return f"Calc: {data['description']}"
+    except Exception:
+        pass
+    return ""
 
 class GeminiPokemonAgent:
-    """Pokemon battle agent powered by Google's Gemini API."""
+    """Pokemon battle agent powered by Langchain and OpenRouter."""
     
-    def __init__(self, api_key: Optional[str] = None, model_name: str = "gemini-2.5-flash"):
+    def __init__(self, api_key: Optional[str] = None, model_name: str = "openai/gpt-oss-120b"):
         """
-        Initialize the Gemini Pokemon agent.
+        Initialize the Langchain Pokemon agent.
         
         Args:
-            api_key: Google AI API key. If None, will try to get from environment
-            model_name: Gemini model to use
+            api_key: OpenRouter API key. If None, will try to get from environment
+            model_name: OpenRouter model to use (starts with openrouter:)
         """
         # Get API key from parameter or environment
-        self.api_key = api_key or os.getenv('GOOGLE_AI_API_KEY') or os.getenv('GEMINI_API_KEY')
+        self.api_key = api_key or os.getenv('OPENROUTER_API_KEY') or os.getenv('OPENAI_API_KEY')
         if not self.api_key:
-            raise ValueError(
-                "No API key provided. Set GOOGLE_AI_API_KEY environment variable "
-                "or pass api_key parameter to GeminiPokemonAgent()"
-            )
+            print("WARNING: No OPENROUTER_API_KEY found in environment. Agent calls may fail.")
+            self.api_key = "dummy-key-to-allow-init"
         
-        # # Configure Gemini
-        # genai.configure(api_key=self.api_key)
-        # self.model_name = model_name
-        
-        # # Initialize the model with safety settings
-        # self.model = genai.GenerativeModel(
-        #     model_name=model_name,
-        #     safety_settings={
-        #         HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
-        #         HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
-        #         HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
-        #         HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
-        #     }
-        # )
-        
-        # # Generation config for consistent responses
-        # self.generation_config = genai.types.GenerationConfig(
-        #     temperature=0.7,
-        #     top_p=0.8,
-        #     top_k=40,
-        #     max_output_tokens=500,
-        # )
-        self.client = genai.Client(api_key=self.api_key)
+        os.environ["OPENROUTER_API_KEY"] = self.api_key
         self.model_name = model_name
-
-
+        
+        # Load typechart for system prompt
+        typechart_str = ""
+        try:
+            with open("typechart.json", "r") as f:
+                typechart_str = f.read()
+        except Exception:
+            pass
+            
+        self.system_prompt = f"You are an expert Pokemon battle strategist. Use the provided state to make your choice.\nHere is the Type Chart for reference:\n{typechart_str}"
+        self.opponent_knowledge = {'active_pokemon': '', 'team': {}}
+        
+        # Use ChatOpenRouter as requested
+        try:
+            self.llm = ChatOpenRouter(
+                model=self.model_name.replace("openrouter:", ""),
+                temperature=0,
+            )
+        except Exception as e:
+            print(f"Failed to init ChatOpenRouter fallback: {e}")
     
-    def create_battle_prompt(self, observation: dict, team_knowledge: Optional[dict] = None) -> str:
+    def create_battle_prompt(self, observation: dict, team_knowledge: Optional[dict] = None, compact_log: str = "", opponent_knowledge: Optional[dict] = None) -> str:
         """
         Create a detailed prompt for the Gemini model based on battle observation.
         
@@ -81,6 +182,20 @@ class GeminiPokemonAgent:
         
         # System prompt
         prompt_parts.append("""""")
+        
+        # Add opponent knowledge if available
+        if opponent_knowledge and opponent_knowledge.get('team'):
+            prompt_parts.append("\n--- OPPONENT KNOWLEDGE ---")
+            prompt_parts.append(f"Active Pokemon: {opponent_knowledge.get('active_pokemon', 'Unknown')}")
+            for pkmn, details in opponent_knowledge['team'].items():
+                moves = list(details.get('moves', []))
+                move_str = ", ".join(moves) if moves else "Unknown"
+                prompt_parts.append(f"  • {pkmn} - Moves: {move_str}, Item: {details.get('item', 'Unknown')}")
+                
+        # Add compact log if available
+        if compact_log:
+            prompt_parts.append("\n--- COMPACT TURN LOG ---")
+            prompt_parts.append(compact_log)
         
         # Current turn and battle state
         prompt_parts.append(f"\n--- BATTLE STATE (Turn {observation.get('turn', '?')}) ---")
@@ -105,6 +220,9 @@ class GeminiPokemonAgent:
                 
                 if status:
                     prompt_parts.append(f"Status: {status}")
+                    
+                if active_pokemon.get('ability'):
+                    prompt_parts.append(f"Ability: {active_pokemon['ability']}")
         
         # Opponent's active Pokemon
         opponent = observation.get('opponent_active', {})
@@ -114,6 +232,12 @@ class GeminiPokemonAgent:
                 prompt_parts.append(f"Opponent HP: {opponent['hp_percent']}%")
             if opponent.get('status'):
                 prompt_parts.append(f"Opponent Status: {opponent['status']}")
+                
+            # Attempt to get opponent's ability from knowledge
+            if opponent_knowledge and opponent_knowledge.get('team') and opponent['species'] in opponent_knowledge['team']:
+                opp_details = opponent_knowledge['team'][opponent['species']]
+                if opp_details.get('ability'):
+                    prompt_parts.append(f"Opponent Ability: {opp_details['ability']}")
         
         # Handle forced switch
         if observation.get('is_forced_switch', False):
@@ -131,11 +255,33 @@ class GeminiPokemonAgent:
         moves = observation.get('available_moves', [])
         if moves:
             prompt_parts.append("\nAvailable Moves:")
+            
+            # Check for choice lock (only one move available, others disabled)
+            disabled_count = sum(1 for m in moves if m.get('disabled', False))
+            if disabled_count == len(moves) - 1 and len(moves) > 1:
+                prompt_parts.append("⚠️ YOU ARE CHOICE LOCKED ⚠️ - You can only use the one non-disabled move.")
+                
+            active_species = 'Unknown'
+            if observation.get('bench'):
+                for pokemon in observation['bench']:
+                    if pokemon.get('active', False):
+                        active_species = pokemon.get('species', 'Unknown')
+                        break
+            opponent_species = observation.get('opponent_active', {}).get('species', 'Unknown')
+                
             for move in moves:
                 move_name = move.get('move', move.get('id', 'Unknown'))
                 pp_info = f"PP: {move.get('pp', '?')}/{move.get('maxpp', '?')}"
                 target = move.get('target', '')
-                prompt_parts.append(f"  {move['index']}. {move_name} ({pp_info}) [Target: {target}]")
+                disabled_str = " [DISABLED - DO NOT CHOOSE]" if move.get('disabled') else ""
+                
+                dmg_ctx = ""
+                if not move.get('disabled') and opponent_species != 'Unknown' and active_species != 'Unknown':
+                    calc_result = _run_calc(active_species, opponent_species, move_name)
+                    if calc_result:
+                        dmg_ctx = f" [{calc_result}]"
+                        
+                prompt_parts.append(f"  {move['index']}. {move_name} ({pp_info}) [Target: {target}]{dmg_ctx}{disabled_str}")
         
         # Available switches (for voluntary switching)
         switches = observation.get('available_switches', [])
@@ -193,128 +339,18 @@ class GeminiPokemonAgent:
         
         # Strategic instructions
         prompt_parts.append("""
-"turn_budgeting": {
-"early_game": "scout sets, establish hazards/positioning",
-"mid_game": "chip key checks, force trades, deny removal",
-"end_game": "enable cleaner/wincon, preserve necessary sacks"
-}
-},
-"core_principles": [
-"Identify win conditions on preview and after each reveal",
-"Play to highest EV of the game state; avoid low-reward overpredictions early",
-"Preserve team roles: wall, pivot, breaker, cleaner, hazard control",
-"Trade HP for progress only when it advances a wincon or removes a hard check",
-"Track information relentlessly; update lines when new info appears"
-],
-"priority_order": [
-"Prevent immediate KOs and checkmates",
-"Secure KOs or decisive chip on opposing wincon",
-"Deny hazard removal or set hazards when uncontested",
-"Capitalize on free turns with setup, pivot, or double switch",
-"Conserve key resources (HP, PP, Tera, items) for endgame"
-],
-"attacking_rules": [
-"Use the strongest reliable move that secures a KO or 2HKO without overexposing",
-"Respect resist/immunity abilities (Flash Fire, Storm Drain, Volt Absorb, Sap Sipper)",
-"Prefer guaranteed damage over reads when ahead; predict when behind or at parity with clear payoff",
-"Avoid contact into Rocky Helmet/Rough Skin/Iron Barbs when chip would flip ranges",
-"Exploit chip thresholds: Stealth Rock + Spikes + Leftovers denial to push into KO range"
-],
-"switching_rules": [
-"Switch when current mon cannot 2HKO and is 2HKO’d back or risks crippling status",
-"Use pivots (U-turn/Volt Switch/Flip Turn/Teleport) to seize momentum into breakers",
-"Double switch to catch obvious answers once they’re constrained",
-"Preserve defensive glue vs opposing breakers; do not sack your only check"
-],
-"type_matchups": [
-"Always prefer STAB super-effective over neutral unless accuracy/priority/coverage dictates",
-"Do not Tera into a type that opens new 4x weaknesses unless it immediately flips the game",
-"Punish locked Choice users by switching into resists/immunities and gaining tempo"
-],
-"pp_management": [
-"Stall low-PP threats (Hydro Steam, Make It Rain, Overheat, Moonblast on key walls) when safe",
-"Avoid spamming low-PP nukes unless it converts into board control or a KO",
-"Use Recover/Slack Off/Strength Sap intelligently; never heal into a free setup"
-],
-"hazards": [
-"Set Stealth Rock early if safe; add Spikes/Tspikes when removal is pressured or blocked",
-"Spin/Defog only when hazard state meaningfully alters ranges or protects wincon",
-"Block removal with Ghost into Spin, pressure Defoggers with breakers/status",
-"Leverage Heavy-Duty Boots knowledge; punish non-Boots pivots with chip cycles"
-],
-"status_and_items": [
-"Spread status to disable walls/cleaners; prioritize Toxic on bulky pivots, Para on fast threats, Burn on physicals",
-"Do not status Guts/Toxic Boost/Poison Heal or Synchronize without payoff",
-"Scout items via damage rolls, recovery (Leftovers/Black Sludge), and speed ties (Choice Scarf inference)",
-"Knock Off high-value targets early; preserve your Boots on hazard-weak mons"
-],
-"weather_terrain_screens": [
-"Count turns for weather/terrain/screens; plan sacks and pivots to waste turns",
-"Deny setters when possible; pressure abusers during downtime",
-"Against screens HO, prioritize chip + phazing/taunt; keep hazards up"
-],
-"setup_and_priority": [
-"Set up only on forced switches or neutered targets; ensure answers are removed or crippled",
-"Use priority to revenge kill or force Tera; avoid revealing priority unnecessarily if the surprise secures endgame",
-"Phaze or Encore opposing setup if checks are strained"
-],
-"terastalization": [
-"Do not Tera without a concrete tactical or strategic gain (KO, walling a threat, enabling sweep)",
-"Track opposing likely Tera types from team structure; respect defensive Tera to block KOs",
-"Save Tera for the mon most aligned with your wincon unless an emergency defense is required"
-],
-"prediction_policy": [
-"Default to safe lines until enough info is gathered; minimize coin flips early",
-"Take calculated reads when payoff is high and downside is limited by sacks or hazards",
-"Use prior reveals and common sets to weight options; update as calcs contradict expectations"
-],
-"risk_management": [
-"Avoid status into Natural Cure/Rest or Flame Body unless payoff > risk",
-"Respect lure coverage (e.g., Fire Blast Garchomp, Ice Beam Slowking-Galar) after telltale sequences",
-"Account for crit risk when behind a sub or versus boosted foes; choose lines that keep outs"
-],
-"information_tracking": {
-"track": [
-"HP percentages and exact damage rolls",
-"Revealed moves, items, abilities, Tera types",
-"Speed tiers from in-battle order and tie outcomes",
-"Hazard state and removal resources",
-"Field turn counters (weather/terrain/screens/room)"
-],
-"update_frequency": "after every action; recalc KO ranges post-chip"
-},
-"endgame": [
-"Identify cleaner candidates (Scarfers, Dragon Dancers, Booster Energy, priority users)",
-"Preserve sacks to generate safe entries for cleaner",
-"Force 50/50s only when winning both branches or when losing otherwise"
-],
-"edge_cases": [
-"Versus Trick/Encore: do not give free locks; pivot to low-opportunity-cost mons",
-"Versus Substitute: break sub first unless you can phaze or outpace",
-"Versus Unaware: prioritize raw power, hazards, and status over boosting",
-"Versus Stall: stack hazards, deny recovery with Taunt/Knock, and manage PP",
-"Versus HO: trade aggressively, keep hazards, deny setup with priority/Encore/phazing"
-],
-"execution_rules": [
-"Always output a legal move or switch; include a brief reason if required by interface",
-"If no safe option exists, choose the line that maximizes outs and preserves wincon odds",
-"On timers, prefer deterministic safe lines over deep calcs"
-],
-"original_guidelines_integrated": [
-"If opponent is low HP, prioritize attacking moves",
-"If our Pokemon is low HP or has bad status, consider switching",
-"Use type advantages when possible",
-"Conserve PP on powerful moves",
-"Consider weather and field effects",
-"Switch to counter opponent's type if needed"
-]
-}""")
+--- INSTRUCTIONS ---
+Analyze the current battle state, focusing on the expected damage calculations provided.
+Choose the optimal move or switch to maximize your chances of winning.
+If a move secures a KO, prioritize it unless it exposes you to an immediate counterattack.
+If you are at a disadvantage, switch to a better defensive check.
+""")
         
         return '\n'.join(prompt_parts)
     
-    def get_battle_decision(self, observation: dict, team_knowledge: Optional[dict] = None) -> dict:
+    def get_battle_decision(self, observation: dict, team_knowledge: Optional[dict] = None, compact_log: str = "", opponent_knowledge: Optional[dict] = None) -> dict:
         """
-        Get a battle decision from Gemini based on the current observation.
+        Get a battle decision from the Langchain Agent based on the current observation.
         
         Args:
             observation: Current battle state
@@ -325,59 +361,97 @@ class GeminiPokemonAgent:
         """
         try:
             # Create the prompt
-            prompt = self.create_battle_prompt(observation, team_knowledge)
-            #print(prompt)
-            # Generate response from Gemini
-            response = self.client.models.generate_content(
-                model=self.model_name,
-                config=types.GenerateContentConfig(
-                    system_instruction="""You are an expert Pokemon battle strategist. Analyze the current battle state and choose the best action.
-                    IMPORTANT: You must respond with ONLY a valid JSON object in this exact format:
-                    {
-                        "action_type": "move" or "switch",
-                        "choice": <number>,
-                        "reasoning": "<brief explanation>"
-                    }
-                    Where:
-                    - action_type: Either "move" to use a move or "switch" to switch Pokemon
-                    - choice: The index number of the move (1-4) or Pokemon slot (1-6) to use
-                    - reasoning: A brief strategic explanation (max 50 words)
-                    Do not include any other text or formatting. Only the JSON object.""",
-    
-                    temperature=0.7,
-response_mime_type="application/json",
-response_schema=ModelAction,
-thinking_config=types.ThinkingConfig(
-thinking_budget=-1,
-include_thoughts=True)
-            ),
-            contents=prompt
-            )
-            #print(prompt)
-            # Parse the response
-            thoughts = self.return_thoughts(response)
-            #print("Thoughts:", thoughts)
-            if response.text:
-                return self.parse_llm_response(response.text, observation, thoughts)
-            else:
-                raise ValueError("Empty response from Gemini")
+            prompt = self.create_battle_prompt(observation, team_knowledge, compact_log, opponent_knowledge)
+            
+            system_instruction = """You are an expert Pokemon battle strategist. Analyze the current battle state and choose the best action.
+            IMPORTANT: You must respond with ONLY a valid JSON object in this exact format:
+            {
+                "action_type": "move" or "switch",
+                "choice": <number>,
+                "reasoning": "<brief explanation>"
+            }
+            Where:
+            - action_type: Either "move" to use a move or "switch" to switch Pokemon
+            - choice: The index number of the move (1-4) or Pokemon slot (1-6) to use
+            - reasoning: A brief strategic explanation (max 50 words)
+            Do not include any other text or formatting. Only the JSON object."""
+            
+            if showdown_wrapper.DEBUG:
+                print(f"[{'='*20} AGENT TEAM {'='*20}]")
+                active = observation.get('active', 'Unknown')
+                print(f"Active: {active}")
+                print(f"Bench: {observation.get('bench', [])}")
+                print(f"[{'='*20} OPPONENT KNOWLEDGE {'='*20}]")
+                print(json.dumps(opponent_knowledge, indent=2, default=lambda o: list(o) if isinstance(o, set) else o) if opponent_knowledge else "None")
+                print(f"{'='*60}")
+            
+            # Using the user's snippet logic
+            try:
+                # Dynamically try to use the create_agent wrapper if available
+                agent = create_agent(
+                    model=self.llm,
+                    tools=[submit_decision],
+                    system_prompt=self.system_prompt
+                )
+                
+                result = agent.invoke(
+                    {"messages": [{"role": "system", "content": system_instruction}, {"role": "user", "content": prompt}]}
+                )
+                
+                # Extract the tool output or final response
+                content = getattr(result["messages"][-1], "content_blocks", result["messages"][-1].content)
+                if isinstance(content, list):
+                    response_text = "".join(
+                        block.get("text", "") if isinstance(block, dict) else str(block) 
+                        for block in content
+                    )
+                else:
+                    response_text = str(content)
+                
+            except (NameError, ImportError, Exception) as e:
+                # If create_agent isn't quite working or langchain-openrouter is missing, use the standard fallback
+                print(f"Agent invoke failed or create_agent missing, falling back to direct LLM: {e}")
+                messages = [
+                    ("system", system_instruction),
+                    ("user", prompt)
+                ]
+                result = self.llm.invoke(messages)
+                content = getattr(result, "content", str(result))
+                if isinstance(content, list):
+                    response_text = "".join(
+                        block.get("text", "") if isinstance(block, dict) else str(block) 
+                        for block in content
+                    )
+                else:
+                    response_text = str(content)
+            
+            if showdown_wrapper.DEBUG:
+                # Try to extract tool calls if using agent
+                if isinstance(result, dict) and "messages" in result:
+                    tool_calls = []
+                    for msg in result["messages"]:
+                        if hasattr(msg, "tool_calls") and msg.tool_calls:
+                            for tc in msg.tool_calls:
+                                tool_calls.append(f"{tc.get('name', 'unknown')}({tc.get('args', {})})")
+                    if tool_calls:
+                        print(f"[{'='*20} FUNCTIONS USED {'='*20}]\n" + "\n".join(tool_calls) + f"\n{'='*58}")
+                
+                print(f"[{'='*20} LLM RAW RESPONSE {'='*20}]\n{response_text}\n{'='*58}")
+                
+            # Parse the text response which should contain JSON from both methods
+            thoughts = "Model Thought:\n" + response_text
+            return self.parse_llm_response(response_text, observation, thoughts)
                 
         except Exception as e:
-            print(f"Gemini API error: {e}")
+            print(f"OpenRouter API error: {e}")
             # Return fallback decision
             return self._get_fallback_decision(observation)
         
     def return_thoughts(self, response: Any) -> str:
         """
         Extract and return the model's thoughts from the response.
-        
-        Args:
-            response: Full response object from Gemini"""
-        thoughts = ""
-        for part in response.candidates[0].content.parts:
-            if part.thought:
-                thoughts += f"Model Thought:\n{part.text}\n"
-        return thoughts
+        """
+        return str(response)
 
     def parse_llm_response(self, response_text: str, observation: dict, thoughts: str) -> dict:
         """
@@ -501,13 +575,13 @@ include_thoughts=True)
 # Global agent instance
 _agent_instance = None
 
-def init_gemini_agent(api_key: Optional[str] = None, model_name: str = "gemini-2.5-flash-lite") -> GeminiPokemonAgent:
+def init_gemini_agent(api_key: Optional[str] = None, model_name: str = "openai/gpt-oss-120b") -> GeminiPokemonAgent:
     """
-    Initialize the global Gemini agent instance.
+    Initialize the global agent instance. (Called gemini_agent for backward compatibility)
     
     Args:
-        api_key: Google AI API key
-        model_name: Gemini model to use
+        api_key: OpenRouter API key
+        model_name: OpenRouter model to use (default: claude-3.5-sonnet)
         
     Returns:
         Initialized agent instance
@@ -516,13 +590,14 @@ def init_gemini_agent(api_key: Optional[str] = None, model_name: str = "gemini-2
     _agent_instance = GeminiPokemonAgent(api_key=api_key, model_name=model_name)
     return _agent_instance
 
-def get_gemini_decision(observation: dict, team_knowledge: Optional[dict] = None) -> dict:
+def get_gemini_decision(observation: dict, team_knowledge: Optional[dict] = None, raw_log: str = "") -> dict:
     """
     Get a battle decision from the initialized Gemini agent.
     
     Args:
         observation: Current battle state
         team_knowledge: Knowledge about our team
+        raw_log: The raw showdown log for the current turn to track opponent info
         
     Returns:
         Decision dictionary
@@ -539,7 +614,11 @@ def get_gemini_decision(observation: dict, team_knowledge: Optional[dict] = None
                 "or set GOOGLE_AI_API_KEY environment variable"
             )
 
-    return _agent_instance.get_battle_decision(observation, team_knowledge)
+    compact_log = ""
+    if raw_log:
+        _agent_instance.opponent_knowledge, compact_log = update_tracker(raw_log, getattr(_agent_instance, 'opponent_knowledge', {'active_pokemon': '', 'team': {}}))
+
+    return _agent_instance.get_battle_decision(observation, team_knowledge, compact_log, getattr(_agent_instance, 'opponent_knowledge', None))
 
 def parse_llm_response(response_text: str, observation: dict) -> Tuple[str, int, str]:
     """

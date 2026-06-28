@@ -1,197 +1,186 @@
 # CLI-Mon Showdown
 
-A terminal-based Pokémon battle CLI that drives the official Pokémon Showdown simulator for accurate mechanics, quick testing, and lightweight play.
+A Pokémon battle tool that drives the official Pokémon Showdown simulator for
+accurate mechanics. It ships in three flavors:
 
-Note: You need a local clone of Pokémon Showdown. This repo expects it at `pokemon-showdown/` in the project root.
+- a terminal **CLI** battle runner (`cli.py`)
+- a **web** version: a FastAPI WebSocket server (`server.py`) + a Vite frontend (`frontend/`)
+- an agent **dashboard** (`dashboard.py`) for inspecting AI state
 
-## Features
+The opponent is an LLM agent driven through **OpenRouter** (LangChain).
 
-- Accurate engine: uses the official Pokémon Showdown simulator
-- AI opponents: Gemini AI agent for strategic battle decisions
-- Teams: load Showdown import/export text files
-- CLI-first: fast feedback loop and readable battle feed
-- Random battles: generate teams via Showdown
-
-## Project Structure
-
-- `cli.py` – main CLI battle runner
-- `gemini_agent.py` – Gemini AI agent for strategic battle decisions
-- `showdown_wrapper.py` – thin wrapper around the Showdown Node process
-- `teams/` – example team files in Showdown format
-- `BATTLE_FIXES.md` – notes on battle handling improvements
+> Note: You need a local clone of Pokémon Showdown at `pokemon-showdown/` in the project root.
 
 ## Requirements
 
-- Python 3.8+
-- Node.js 16+
+- Python 3.10+ (developed against 3.12)
+- Node.js 18+ (used to run the Showdown simulator and the Vite frontend)
 - A local checkout of `smogon/pokemon-showdown`
+- An **OpenRouter API key** ([openrouter.ai/keys](https://openrouter.ai/keys))
 
-## Quick Start
+## Setup
 
-PowerShell (Windows):
+### 1. Get the Pokémon Showdown simulator
 
-```powershell
-git clone https://github.com/papichoolo/cli-mon-showdown.git
-cd cli-mon-showdown
+The code expects the simulator at `pokemon-showdown/` in the project root.
 
-# Optional: create a virtualenv (no external Python deps required)
-python -m venv .venv
-.venv\Scripts\activate
-
-# Get Pokémon Showdown inside this project
+```bash
 git clone https://github.com/smogon/pokemon-showdown.git
 cd pokemon-showdown
 npm ci
 cd ..
-
-# Run a battle with sample teams
-python cli.py teams/p1.txt teams/p2.txt --format gen7ou
 ```
 
-## Gemini AI Agent Configuration
+`npm ci` produces the compiled `dist/` and the `pokemon-showdown` CLI binary that
+this project shells out to (`simulate-battle`, `pack-team`, `validate-team`,
+`generate-team`).
 
-The CLI includes an optional Gemini AI agent that can play as Player 2, making strategic decisions based on battle state analysis. This provides a more challenging and realistic opponent compared to the default random AI.
+### 2. Install Python dependencies
 
-### Prerequisites
-
-1. **Google AI API Key**: You need access to Google's Gemini API
-   - Get an API key from [Google AI Studio](https://aistudio.google.com/apikey)
-   - The API may require billing setup depending on usage
-
-2. **Python Dependencies**: Install the required packages
-   ```powershell
-   pip install -r requirements.txt
-   ```
-
-### Configuration
-
-Set your API key using one of these methods:
-
-**Option 1: Environment Variable (Recommended)**
-```powershell
-# PowerShell (persistent)
-[Environment]::SetEnvironmentVariable("GOOGLE_AI_API_KEY", "your-api-key-here", "User")
-
-# PowerShell (current session only)
-$env:GOOGLE_AI_API_KEY = "your-api-key-here"
-```
-
-**Option 2: Alternative Environment Variable**
-```powershell
-$env:GEMINI_API_KEY = "your-api-key-here"
-```
-
-### Usage with Gemini AI
-
-Once configured, the Gemini AI agent will automatically be used for Player 2 when the `--p2-ai` flag is enabled (which is the default):
-
-```powershell
-# Gemini AI will control Player 2 automatically
-python cli.py teams/p1.txt teams/p2.txt --format gen7ou
-
-# Support for Random Battles as well
-python cli.py --randbat
-```
-
-### Features of the Gemini AI Agent
-
-- **Strategic Analysis**: Evaluates complex battle states including HP, status conditions, type matchups, and team composition
-- **Advanced Decision Making**: Considers win conditions, hazard management, momentum, and endgame scenarios
-- **Competitive Play Style**: Follows high-level competitive Pokemon principles and strategies
-- **Fallback Safety**: Automatically falls back to basic heuristics if API calls fail
-
-### Model Configuration
-
-The default model is `gemini-2.5-flash-lite` for optimal performance and cost. Advanced users can modify the model in `gemini_agent.py`:
-
-```python
-# In gemini_agent.py, modify the init_gemini_agent function
-agent = init_gemini_agent(model_name="gemini-2.5-flash")  # More capable but slower/costlier
-```
-
-Available models:
-- `gemini-2.5-flash-lite` (default): Fast, cost-effective
-- `gemini-2.5-flash`: More capable, higher cost
-- `gemini-2.0-flash-exp`: Experimental features
-
-### Troubleshooting Gemini Setup
-
-- **"No API key found"**: Ensure your environment variable is set correctly and restart your terminal
-- **API errors**: Check that your API key is valid and you have sufficient quota
-- **Import errors**: Run `pip install -r requirements.txt` to install dependencies
-- **Fallback behavior**: If Gemini fails, the system automatically uses random decisions with a warning message
-
-
-Bash (macOS/Linux):
+**Linux / macOS**
 
 ```bash
-git clone https://github.com/papichoolo/cli-mon-showdown.git
-cd cli-mon-showdown
-
 python3 -m venv .venv
 source .venv/bin/activate
-
-git clone https://github.com/smogon/pokemon-showdown.git
-cd pokemon-showdown && npm ci && cd ..
-
-python3 cli.py teams/p1.txt teams/p2.txt --format gen7ou
+pip install -r requirements.txt
 ```
 
-## Setup Details
+**Windows (PowerShell)**
 
-- Python: this project uses the standard library plus optional AI dependencies. See `requirements.txt` for AI agent dependencies.
-- Node: used to run the Showdown simulator and its CLI utilities (`simulate-battle`, `pack-team`, `validate-team`, `generate-team`).
-- Showdown path: by default the code looks for `pokemon-showdown/pokemon-showdown`. Keep the folder at the project root or adjust the code if you move it.
+```powershell
+py -3 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+```
+
+### 3. Configure your API key
+
+The LLM agent reads `OPENROUTER_API_KEY` (and falls back to `OPENAI_API_KEY`).
+Create a `.env` file in the project root:
+
+```dotenv
+OPENROUTER_API_KEY=sk-or-your-key-here
+```
+
+`.env` is git-ignored — never commit real keys. If you change the model, the
+default is `openai/gpt-oss-120b` (see `gemini_agent.py`).
+
+| Variable | Required | Purpose |
+| --- | --- | --- |
+| `OPENROUTER_API_KEY` | yes | LLM opponent via OpenRouter |
+| `OPENAI_API_KEY` | no | Fallback if `OPENROUTER_API_KEY` is unset |
+
+## Running
+
+### Quick start (one command)
+
+`dev.py` bootstraps the environment (creates `.venv`, installs Python + frontend
+deps), verifies prerequisites, then starts and supervises the **server**,
+**dashboard**, and **frontend** together with colored, interleaved logs. Press
+`Ctrl-C` once to shut the whole stack down cleanly (the Showdown node processes
+are reaped automatically).
+
+```bash
+make dev          # or: python3 dev.py
+```
+
+This brings up:
+
+- battle server: `http://127.0.0.1:8000` (WebSocket at `/ws/battle`)
+- dashboard:     `http://127.0.0.1:8080`
+- frontend:      `http://127.0.0.1:5173`
+
+Useful flags:
+
+```bash
+python3 dev.py --no-install     # skip dependency install (faster restarts)
+python3 dev.py --no-frontend    # server + dashboard only
+python3 dev.py --host 0.0.0.0   # expose on the network
+python3 dev.py --server-port 9000 --dashboard-port 9090 --frontend-port 3000
+```
+
+`make stop` kills any stray `uvicorn` / `vite` processes if something is left over.
+
+> You still need the `pokemon-showdown/` clone (see Setup) and an API key in
+> `.env`. `dev.py` checks for these and tells you what's missing.
+
+The individual services can also be started by hand:
+
+### CLI battle runner
+
+Activate the virtualenv first (`source .venv/bin/activate` or
+`.\.venv\Scripts\Activate.ps1`).
+
+```bash
+# Battle with sample teams (LLM agent controls Player 2 by default)
+python cli.py teams/p1.txt teams/p2.txt --format gen7ou
+
+# Random battle, no team files required
+python cli.py --randbat --format gen7randombattle
+```
+
+### Web version (server + frontend) — manual
+
+Terminal 1 — start the WebSocket server on port `8000` (endpoint `/ws/battle`,
+a gen7 random battle with the LLM as Player 2):
+
+```bash
+python server.py
+# or: uvicorn server:app --host 0.0.0.0 --port 8000
+```
+
+Terminal 2 — start the Vite dev frontend (connects to `ws://localhost:8000/ws/battle`):
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Open the URL Vite prints (typically `http://localhost:5173`).
+
+### Agent dashboard — manual
+
+Serves `dashboard.html` on port `8080`, reading `agent_state.json`:
+
+```bash
+python dashboard.py
+# or: uvicorn dashboard:app --host 127.0.0.1 --port 8080
+```
+
+Open `http://127.0.0.1:8080`.
 
 ## CLI Usage
 
-Basic:
-
-```powershell
+```bash
 python cli.py <p1_team> <p2_team> [--format FORMAT] [flags]
-```
-
-Random battle (no team files required):
-
-```powershell
-python cli.py --randbat --format gen7randombattle
 ```
 
 ### Flags
 
-- p1: path to Player 1 team file (Showdown importable).
-- p2: path to Player 2 team file.
-- --format FORMAT: Showdown format id. Default: gen7ou. Examples: gen7ou, gen9ou, gen7randombattle.
-- --randbat: generate random teams for both players (ignores p1/p2 positional args).
-- --no-auto-preview: disable automatic team preview ordering; you’ll be prompted to choose.
-- --side {p1|p2}: which side unprefixed commands control. Default: p1.
-- --p2-ai / --no-p2-ai: enable/disable AI for Player 2. When enabled with Gemini configured, uses Gemini AI agent. Default: enabled.
-- --humanize / --raw: show a summarized human-readable feed (default) or raw Showdown log lines.
-- --window / --no-window: render a minimal in-terminal game window (default) or print plain text only.
-- --debug: print additional debug information.
+- `p1` / `p2`: paths to team files (Showdown importable format).
+- `--format FORMAT`: Showdown format id. Default: `gen7ou`. Examples: `gen7ou`, `gen9ou`, `gen7randombattle`.
+- `--randbat`: generate random teams for both players (ignores `p1`/`p2`).
+- `--no-auto-preview`: disable automatic team preview ordering.
+- `--side {p1|p2}`: which side unprefixed commands control. Default: `p1`.
+- `--p2-ai` / `--no-p2-ai`: enable/disable the LLM agent for Player 2. Default: enabled.
+- `--humanize` / `--raw`: summarized human-readable feed (default) or raw Showdown log lines.
+- `--window` / `--no-window`: minimal in-terminal game window (default) or plain text.
+- `--debug`: print additional debug information.
 
 Examples:
 
-```powershell
-# Gen 7 OU with built teams
-python cli.py teams/p1.txt teams/p2.txt --format gen7ou
-
-# Random battle using Showdown’s generator
-python cli.py --randbat --format gen7randombattle
-
+```bash
 # Control p2 manually and show raw stream
 python cli.py teams/p1.txt teams/p2.txt --side p2 --no-p2-ai --raw
 
-# Disable the windowed UI and team auto-preview
-python cli.py teams/p1.txt teams/p2.txt --no-window --no-auto-preview
-
-# Play against Gemini AI with debug information
+# Play against the LLM with debug information
 python cli.py teams/p1.txt teams/p2.txt --format gen9ou --debug --p2-ai
 ```
 
 ## Teams
 
-Team files should be in Pokémon Showdown’s import/export text format, for example:
+Team files use Pokémon Showdown's import/export text format, for example:
 
 ```
 Charizard @ Life Orb
@@ -204,16 +193,32 @@ Timid Nature
 - Hidden Power Ice
 ```
 
-When you run the CLI, your teams are packed and validated via Showdown’s CLI (`pack-team` and `validate-team`). If validation fails, the error output from Showdown is shown.
+Teams are packed and validated via Showdown's CLI (`pack-team` and `validate-team`).
+If validation fails, the Showdown error output is shown.
+
+## Project Structure
+
+- `cli.py` – main CLI battle runner
+- `dev.py` – one-command launcher that bootstraps and supervises the full stack
+- `server.py` – FastAPI WebSocket server backing the web version
+- `frontend/` – Vite web client (connects over WebSocket to `server.py`)
+- `dashboard.py` / `dashboard.html` – agent state dashboard (reads `agent_state.json`)
+- `gemini_agent.py` – LLM battle agent (LangChain + OpenRouter)
+- `showdown_wrapper.py` – thin wrapper around the Showdown Node process
+- `poke_env_agent.py` / `run_poke_env.py` / `remote_showdown.py` – poke-env / remote server play
+- `teams/` – example team files in Showdown format
+- `pokemon-showdown/` – local clone of the simulator (you provide this)
 
 ## Troubleshooting
 
-- “node: not found” or “file not found”: ensure Node.js is installed and `node` is on your PATH.
-- Pokémon Showdown not found: confirm the folder exists at `pokemon-showdown/` and run `npm ci` inside it.
-- Validation errors: check that your team is legal in the chosen `--format`.
-- Terminal window not rendering: some terminals may not support the UI; try `--no-window`.
+- **"node: not found" / "file not found"**: ensure Node.js is installed and `node` is on your PATH.
+- **Pokémon Showdown not found**: confirm `pokemon-showdown/` exists at the project root and `npm ci` ran inside it.
+- **"No OPENROUTER_API_KEY found"**: set it in `.env` (or your shell). The agent falls back to a dummy key and calls will fail without a real one.
+- **Frontend can't connect**: start `server.py` first; the frontend expects `ws://localhost:8000/ws/battle`.
+- **Port already in use**: the server uses `8000`, the dashboard `8080`, and Vite `5173`. Stop conflicting processes or change the ports.
+- **Validation errors**: check that your team is legal in the chosen `--format`.
+- **Terminal window not rendering**: try `--no-window`.
 
 ---
 
-Created by papichoolo. Uses the official Pokémon Showdown simulator.
-
+Uses the official Pokémon Showdown simulator.

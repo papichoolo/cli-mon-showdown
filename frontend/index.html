@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>CLI-Mon Showdown Web</title>
+    <link rel="stylesheet" href="./style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700;900&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+  </head>
+  <body>
+    <div id="app">
+      <header>
+        <h1>CLI-Mon <span>Showdown</span></h1>
+        <p class="subtitle">Agentic Battle Simulator</p>
+      </header>
+      
+      <main class="layout-grid">
+        
+        <!-- Left: Battle Log -->
+        <section class="glass-panel feed-panel">
+          <h2>Battle Log</h2>
+          <div id="battle-log" class="log-container">
+            <div class="log-entry system">Connecting to simulator...</div>
+          </div>
+        </section>
+
+        <!-- Center: Arena and Controls -->
+        <section class="center-panel">
+          <div class="glass-panel arena-panel">
+            <div class="arena">
+              
+              <!-- Opponent (P2) -->
+              <div class="mon p2-mon">
+                <div class="hp-bar-container">
+                  <div class="mon-name" id="p2-name">Opponent</div>
+                  <div class="hp-track"><div class="hp-fill" id="p2-hp-fill" style="width: 100%"></div></div>
+                  <div class="status-tags" id="p2-tags"></div>
+                </div>
+                <div class="sprite-placeholder opponent"></div>
+              </div>
+
+              <!-- Player (P1) -->
+              <div class="mon p1-mon">
+                <div class="sprite-placeholder player"></div>
+                <div class="hp-bar-container">
+                  <div class="mon-name" id="p1-name">Waiting...</div>
+                  <div class="hp-track"><div class="hp-fill" id="p1-hp-fill" style="width: 100%"></div></div>
+                  <div class="status-tags" id="p1-tags"></div>
+                </div>
+              </div>
+              
+            </div>
+          </div>
+
+          <div class="glass-panel controls-panel">
+            <div id="controls-container">
+              <h3>Action</h3>
+              <div class="actions-grid" id="action-buttons">
+                <!-- Buttons injected via JS -->
+                 <p class="placeholder-text">Waiting for turn...</p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Right: AI Insights -->
+        <section class="glass-panel ai-panel">
+          <div class="ai-header">
+            <h2>Gemini Insights</h2>
+            <div class="pulse-indicator"></div>
+          </div>
+          <div class="insight-content">
+            <div id="ai-status">Monitoring battle state...</div>
+            <div id="ai-thoughts" class="thoughts-box">
+               <span class="muted">Awaiting observation...</span>
+            </div>
+            <div class="reasoning-box">
+              <span class="label">FINAL DECISION:</span>
+              <div id="ai-reasoning">—</div>
+            </div>
+          </div>
+        </section>
+
+      </main>
+    </div>
+    <script type="module" src="./main.js"></script>
+  </body>
+</html>

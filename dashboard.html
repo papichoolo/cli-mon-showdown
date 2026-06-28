@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>CLI-Mon Agent Dashboard</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&family=Fira+Code&display=swap" rel="stylesheet">
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            background: #0f172a;
+            color: #e2e8f0;
+            font-family: 'Inter', sans-serif;
+        }
+        h1 {
+            color: #38bdf8;
+            font-weight: 800;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 20px;
+        }
+        .container {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        .card {
+            background: rgba(30, 41, 59, 0.7);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+        }
+        .card h2 {
+            margin-top: 0;
+            color: #f8fafc;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            padding-bottom: 10px;
+        }
+        .highlight {
+            color: #a78bfa;
+            font-weight: bold;
+        }
+        pre {
+            background: #020617;
+            padding: 15px;
+            border-radius: 8px;
+            font-family: 'Fira Code', monospace;
+            overflow-x: auto;
+            color: #10b981;
+            white-space: pre-wrap;
+            max-height: 600px;
+            overflow-y: auto;
+        }
+        .reasoning-box {
+            font-size: 1.1em;
+            line-height: 1.6;
+            color: #e2e8f0;
+        }
+        .badge {
+            display: inline-block;
+            background: #3b82f6;
+            color: white;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 0.8em;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <h1>🤖 CLI-Mon Agent Dashboard <span id="turn-badge" class="badge">Waiting...</span></h1>
+    <div class="container">
+        <div class="column">
+            <div class="card" style="margin-bottom: 20px;">
+                <h2>🧠 Current Thought Process</h2>
+                <div id="reasoning" class="reasoning-box" style="color: #cbd5e1;">Waiting for battle to start...</div>
+                
+                <h3 style="margin-top: 20px; color: #f8fafc; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 10px;">⚡ Chosen Action</h3>
+                <div class="highlight" id="action" style="font-size: 1.5em; text-transform: uppercase;">-</div>
+            </div>
+            
+            <div class="card">
+                <h2>🌳 Search Tree (Placeholder)</h2>
+                <div style="color: #94a3b8; font-style: italic; line-height: 1.5;">
+                    Local simulator is not yet integrated. Once you port over pokechamp's Minimax tree, the state evaluations and depth branching will be visualized here!
+                </div>
+            </div>
+        </div>
+        
+        <div class="column">
+            <div class="card">
+                <h2>📊 Battle State Context</h2>
+                <pre id="prompt">Waiting for state...</pre>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        async function updateDashboard() {
+            try {
+                const res = await fetch('/api/state');
+                const data = await res.json();
+                
+                if (data.turn !== undefined) {
+                    document.getElementById('turn-badge').innerText = 'Turn ' + data.turn;
+                    document.getElementById('reasoning').innerText = data.reasoning;
+                    
+                    let actionText = data.action_type ? data.action_type + ' ➔ ' + data.choice : 'THINKING...';
+                    document.getElementById('action').innerText = actionText;
+                    
+                    document.getElementById('prompt').innerText = data.prompt;
+                }
+            } catch (e) {
+                console.error("Dashboard polling error:", e);
+            }
+        }
+        
+        // Poll every 1 second for live updates
+        setInterval(updateDashboard, 1000);
+        updateDashboard();
+    </script>
+</body>
+</html>

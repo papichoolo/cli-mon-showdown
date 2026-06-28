@@ -238,6 +238,7 @@ class BattleSession:
                             self._send(
                                 {
                                     "type": "ai_insight",
+                                    "input": decision.get("input_prompt", ""),
                                     "thoughts": decision.get("thoughts", ""),
                                     "reasoning": decision.get("reasoning", ""),
                                     "action_type": decision.get("action_type"),

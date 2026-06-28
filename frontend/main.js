@@ -246,15 +246,10 @@ connectBtn.onclick = () => {
       }
     } else if (msg.type === 'ai_insight') {
       aiStatus.textContent = "Gemini has made a decision!";
-      aiThoughts.textContent = '';
-      const textToType = msg.thoughts || 'No thoughts generated.';
-      let i = 0;
-      const typeInterval = setInterval(() => {
-          aiThoughts.textContent += textToType.charAt(i);
-          aiThoughts.scrollTop = aiThoughts.scrollHeight;
-          i++;
-          if (i >= textToType.length) clearInterval(typeInterval);
-      }, 10);
+      const aiInput = document.getElementById('ai-input');
+      if (aiInput) aiInput.textContent = msg.input || 'No input context available.';
+      aiThoughts.textContent = msg.thoughts || 'No thoughts generated.';
+      aiThoughts.scrollTop = aiThoughts.scrollHeight;
       aiReasoning.textContent = msg.reasoning || '—';
     }
   };
@@ -278,6 +273,8 @@ newBattleBtn.onclick = () => {
   newBattleBtn.classList.add('hidden');
   showdownLink.classList.add('hidden');
   logContainer.innerHTML = '<div class="log-entry system">Connecting to simulator...</div>';
+  const aiInput = document.getElementById('ai-input');
+  if (aiInput) aiInput.textContent = 'Waiting for turn...';
   aiThoughts.innerHTML = '<span class="muted">Awaiting observation...</span>';
   aiReasoning.textContent = '—';
   aiStatus.textContent = 'Monitoring battle state...';

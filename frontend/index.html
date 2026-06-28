@@ -83,9 +83,17 @@
             </div>
             <div class="insight-content">
               <div id="ai-status">Monitoring battle state...</div>
-              <div id="ai-thoughts" class="thoughts-box">
-                 <span class="muted">Awaiting observation...</span>
-              </div>
+              
+              <details class="debug-details">
+                <summary>Input Prompt (Truncated)</summary>
+                <div id="ai-input" class="thoughts-box">Waiting for turn...</div>
+              </details>
+
+              <details class="debug-details" open>
+                <summary>Model Output (Raw)</summary>
+                <div id="ai-thoughts" class="thoughts-box"><span class="muted">Awaiting observation...</span></div>
+              </details>
+              
               <div class="reasoning-box">
                 <span class="label">FINAL DECISION:</span>
                 <div id="ai-reasoning">—</div>

@@ -421,3 +421,35 @@ button.action-btn.switch { border-left: 4px solid var(--accent-purple); }
 .showdown-link:hover {
   text-decoration: underline;
 }
+
+details.debug-details {
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  margin-bottom: 12px;
+  overflow: hidden;
+}
+
+details.debug-details summary {
+  padding: 10px 14px;
+  font-size: 0.85rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  cursor: pointer;
+  background: rgba(255, 255, 255, 0.05);
+  user-select: none;
+}
+
+details.debug-details summary:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text-primary);
+}
+
+details.debug-details .thoughts-box {
+  border: none;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  margin: 0;
+  border-radius: 0;
+  max-height: 300px;
+}

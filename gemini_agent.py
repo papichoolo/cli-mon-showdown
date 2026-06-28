@@ -156,6 +156,14 @@ class GeminiPokemonAgent:
             pass
             
         self.system_prompt = f"You are an expert Pokemon battle strategist. Use the provided state to make your choice.\nHere is the Type Chart for reference:\n{typechart_str}"
+        
+        # Load Gen 9 Random Battle Sets for opponent prediction
+        self.random_sets = {}
+        try:
+            with open("pokemon-showdown/dist/data/random-battles/gen9/sets.json", "r") as f:
+                self.random_sets = json.load(f)
+        except Exception as e:
+            print(f"Could not load random sets: {e}")
         self.opponent_knowledge = {'active_pokemon': '', 'team': {}}
         
         # Use ChatOpenRouter as requested
@@ -238,6 +246,22 @@ class GeminiPokemonAgent:
                 opp_details = opponent_knowledge['team'][opponent['species']]
                 if opp_details.get('ability'):
                     prompt_parts.append(f"Opponent Ability: {opp_details['ability']}")
+                    
+            # Inject possible moves from Random Battle sets
+            sanitized_species = opponent['species'].lower().replace(" ", "").replace("-", "")
+            if hasattr(self, 'random_sets') and sanitized_species in self.random_sets:
+                possible_sets = self.random_sets[sanitized_species].get("sets", [])
+                all_moves = set()
+                all_abilities = set()
+                for s in possible_sets:
+                    for m in s.get("movepool", []):
+                        all_moves.add(m)
+                    for a in s.get("abilities", []):
+                        all_abilities.add(a)
+                if all_moves:
+                    prompt_parts.append(f"Possible RandomBattle Moves: {', '.join(sorted(list(all_moves)))}")
+                if all_abilities:
+                    prompt_parts.append(f"Possible Abilities: {', '.join(sorted(list(all_abilities)))}")
         
         # Handle forced switch
         if observation.get('is_forced_switch', False):
@@ -440,7 +464,13 @@ If you are at a disadvantage, switch to a better defensive check.
                 
             # Parse the text response which should contain JSON from both methods
             thoughts = "Model Thought:\n" + response_text
-            return self.parse_llm_response(response_text, observation, thoughts)
+            decision_dict = self.parse_llm_response(response_text, observation, thoughts)
+            
+            # Truncate prompt to ~1000 characters for the UI
+            truncated_prompt = prompt[:1000] + "\n... [TRUNCATED]" if len(prompt) > 1000 else prompt
+            decision_dict['input_prompt'] = truncated_prompt
+            
+            return decision_dict
                 
         except Exception as e:
             print(f"OpenRouter API error: {e}")

@@ -1264,26 +1264,7 @@ def _llm_agent_decision(
     )
     debug_print(f"LLM agent prompt context:\n{prompt_context}", "LLM_AGENT_PROMPT")
 
-    # Handle forced switch scenarios
-    if observation.get("is_forced_switch", False):
-        available_switches = observation.get("available_switches", [])
-        if available_switches:
-            choice = available_switches[0]["index"]
-            debug_print(f"LLM agent chose forced switch: {choice}", "LLM_AGENT")
-            return {
-                "action_type": "switch",
-                "choice": choice,
-                "reasoning": f"Forced to switch to {available_switches[0]['species']}",
-            }
-        else:
-            debug_print(
-                "LLM agent: No switches available for forced switch", "LLM_AGENT"
-            )
-            return {
-                "action_type": "switch",
-                "choice": 1,
-                "reasoning": "No valid switches available",
-            }
+    # Forced switch scenarios are now handled by the LLM natively.
 
     # Handle wait scenarios (Pokemon can't move)
     if observation.get("must_wait", False):

@@ -1,7 +1,5 @@
-.PHONY: dev setup stop help
-
 help:
-	@echo "make dev    - bootstrap and run the full stack (server + dashboard + frontend)"
+	@echo "make dev    - bootstrap and run the full stack (server + frontend)"
 	@echo "make setup  - install dependencies only, don't start anything"
 	@echo "make stop   - kill any stray uvicorn / vite / node processes"
 
@@ -14,5 +12,6 @@ setup:
 
 stop:
 	-pkill -f "uvicorn server:app" 2>/dev/null || true
-	-pkill -f "uvicorn dashboard:app" 2>/dev/null || true
+	-pkill -f "npm run dev" 2>/dev/null || true
 	-pkill -f "vite" 2>/dev/null || true
+

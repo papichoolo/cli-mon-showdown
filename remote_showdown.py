@@ -150,7 +150,7 @@ class RemoteShowdownWrapper:
                 if line.startswith(">battle-"):
                     continue
                 if line.startswith("|request|"):
-                    lines.append("p2") # Fake side marker for cli.py
+                    lines.append(self.bot_side or "p2") # Side marker for parsers
                 lines.append(line)
         return lines
 

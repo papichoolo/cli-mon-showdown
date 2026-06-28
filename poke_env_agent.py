@@ -36,7 +36,7 @@ def _run_calc(attacker_name: str, defender_name: str, move_name: str) -> str:
 
 class GeminiPlayer(Player):
     def __init__(
-        self, api_key: str = None, model_name: str = "openai/gpt-oss-120b", **kwargs
+        self, api_key: str = None, model_name: str = "openai/gpt-5.4-mini", **kwargs
     ):
         super().__init__(**kwargs)
         self.api_key = (

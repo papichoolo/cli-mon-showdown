@@ -216,10 +216,10 @@ def main() -> None:
     parser.add_argument("--no-frontend", action="store_true", help="don't start the Vite dev server")
     parser.add_argument("--no-install", action="store_true", help="skip dependency installation")
     parser.add_argument("--server-port", default="8000")
-    parser.add_argument("--dashboard-port", default="8080")
     parser.add_argument("--frontend-port", default="5173")
     parser.add_argument("--host", default="127.0.0.1")
     args = parser.parse_args()
+
 
     ensure_prerequisites()
     ensure_venv(install=not args.no_install)
@@ -236,11 +236,6 @@ def main() -> None:
         [py, "-m", "uvicorn", "server:app", "--host", args.host, "--port", args.server_port],
         env,
     )
-    spawn(
-        "dashboard",
-        [py, "-m", "uvicorn", "dashboard:app", "--host", args.host, "--port", args.dashboard_port],
-        env,
-    )
     if not args.no_frontend:
         spawn(
             "frontend",
@@ -249,12 +244,13 @@ def main() -> None:
             cwd=FRONTEND,
         )
 
+
     log("setup", f"{BOLD}Stack is up.{RESET}" if supports_color() else "Stack is up.")
     log("setup", f"  battle server : http://{args.host}:{args.server_port}")
-    log("setup", f"  dashboard     : http://{args.host}:{args.dashboard_port}")
     if not args.no_frontend:
         log("setup", f"  frontend      : http://{args.host}:{args.frontend_port}")
     log("setup", "Press Ctrl-C to stop everything.")
+
 
     try:
         while not stopping.is_set():

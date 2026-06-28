@@ -13,9 +13,54 @@
         <h1>CLI-Mon <span>Showdown</span></h1>
         <p class="subtitle">Agentic Battle Simulator</p>
       </header>
-      
-      <main class="layout-grid">
-        
+
+      <!-- Login / setup screen -->
+      <section id="login-screen" class="glass-panel login-panel">
+        <h2>Connect &amp; Battle</h2>
+        <p class="login-intro">
+          Gemini logs into Pokémon Showdown <strong>as you</strong> and plays random
+          battles on your behalf. Watch its reasoning here and the live battle on the
+          right.
+        </p>
+
+        <div class="mode-toggle">
+          <label class="mode-option">
+            <input type="radio" name="mode" value="remote" checked />
+            <span>Remote (Gemini plays as me)</span>
+          </label>
+          <label class="mode-option">
+            <input type="radio" name="mode" value="local" />
+            <span>Local (I play vs Gemini)</span>
+          </label>
+        </div>
+
+        <div id="remote-fields">
+          <label class="field">
+            <span>Showdown Username</span>
+            <input id="username" type="text" autocomplete="username" placeholder="YourShowdownName" />
+          </label>
+          <label class="field">
+            <span>Password</span>
+            <input id="password" type="password" autocomplete="current-password" placeholder="••••••••" />
+          </label>
+        </div>
+
+        <label class="field">
+          <span>Format</span>
+          <select id="format">
+            <option value="gen9randombattle" selected>gen9randombattle</option>
+            <option value="gen8randombattle">gen8randombattle</option>
+            <option value="gen7randombattle">gen7randombattle</option>
+          </select>
+        </label>
+
+        <button id="connect-btn" class="connect-btn">Connect &amp; Start Battle</button>
+        <p id="login-status" class="login-status muted">Enter your credentials to begin.</p>
+      </section>
+
+      <!-- Battle screen -->
+      <main id="battle-screen" class="layout-grid hidden">
+
         <!-- Left: Battle Log -->
         <section class="glass-panel feed-panel">
           <h2>Battle Log</h2>
@@ -24,59 +69,36 @@
           </div>
         </section>
 
-        <!-- Center: Arena and Controls -->
+        <!-- Center: AI Insights + controls -->
         <section class="center-panel">
-          <div class="glass-panel arena-panel">
-            <div class="arena">
-              
-              <!-- Opponent (P2) -->
-              <div class="mon p2-mon">
-                <div class="hp-bar-container">
-                  <div class="mon-name" id="p2-name">Opponent</div>
-                  <div class="hp-track"><div class="hp-fill" id="p2-hp-fill" style="width: 100%"></div></div>
-                  <div class="status-tags" id="p2-tags"></div>
-                </div>
-                <div class="sprite-placeholder opponent"></div>
+          
+          <div class="glass-panel ai-panel" style="flex: 2; margin-bottom: 20px;">
+            <div class="ai-header">
+              <h2>Gemini Insights</h2>
+              <div style="display: flex; align-items: center; gap: 12px;">
+                <a id="showdown-link" class="showdown-link hidden" target="_blank" rel="noopener">Open on Showdown ↗</a>
+                <button id="new-battle-btn" class="connect-btn hidden" style="padding: 6px 12px; margin: 0; font-size: 0.85rem; width: auto;">New Battle</button>
+                <div class="pulse-indicator"></div>
               </div>
-
-              <!-- Player (P1) -->
-              <div class="mon p1-mon">
-                <div class="sprite-placeholder player"></div>
-                <div class="hp-bar-container">
-                  <div class="mon-name" id="p1-name">Waiting...</div>
-                  <div class="hp-track"><div class="hp-fill" id="p1-hp-fill" style="width: 100%"></div></div>
-                  <div class="status-tags" id="p1-tags"></div>
-                </div>
+            </div>
+            <div class="insight-content">
+              <div id="ai-status">Monitoring battle state...</div>
+              <div id="ai-thoughts" class="thoughts-box">
+                 <span class="muted">Awaiting observation...</span>
               </div>
-              
+              <div class="reasoning-box">
+                <span class="label">FINAL DECISION:</span>
+                <div id="ai-reasoning">—</div>
+              </div>
             </div>
           </div>
 
-          <div class="glass-panel controls-panel">
+          <div id="controls-panel" class="glass-panel controls-panel hidden">
             <div id="controls-container">
               <h3>Action</h3>
               <div class="actions-grid" id="action-buttons">
-                <!-- Buttons injected via JS -->
                  <p class="placeholder-text">Waiting for turn...</p>
               </div>
-            </div>
-          </div>
-        </section>
-
-        <!-- Right: AI Insights -->
-        <section class="glass-panel ai-panel">
-          <div class="ai-header">
-            <h2>Gemini Insights</h2>
-            <div class="pulse-indicator"></div>
-          </div>
-          <div class="insight-content">
-            <div id="ai-status">Monitoring battle state...</div>
-            <div id="ai-thoughts" class="thoughts-box">
-               <span class="muted">Awaiting observation...</span>
-            </div>
-            <div class="reasoning-box">
-              <span class="label">FINAL DECISION:</span>
-              <div id="ai-reasoning">—</div>
             </div>
           </div>
         </section>

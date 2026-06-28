@@ -130,7 +130,7 @@ def _run_calc(attacker_name: str, defender_name: str, move_name: str) -> str:
 class GeminiPokemonAgent:
     """Pokemon battle agent powered by Langchain and OpenRouter."""
     
-    def __init__(self, api_key: Optional[str] = None, model_name: str = "openai/gpt-oss-120b"):
+    def __init__(self, api_key: Optional[str] = None, model_name: str = "openai/gpt-5.4-mini"):
         """
         Initialize the Langchain Pokemon agent.
         
@@ -575,7 +575,7 @@ If you are at a disadvantage, switch to a better defensive check.
 # Global agent instance
 _agent_instance = None
 
-def init_gemini_agent(api_key: Optional[str] = None, model_name: str = "openai/gpt-oss-120b") -> GeminiPokemonAgent:
+def init_gemini_agent(api_key: Optional[str] = None, model_name: str = "openai/gpt-4o") -> GeminiPokemonAgent:
     """
     Initialize the global agent instance. (Called gemini_agent for backward compatibility)
     

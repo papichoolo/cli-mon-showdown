@@ -59,7 +59,7 @@ class BattleSession:
             )
             fut.result(timeout=5)
         except Exception as e:
-            print(f"WS send error: {e}")
+            print(f"WS send error: {repr(e)}")
 
     # ------------------------------------------------------------------ #
     # Battle startup

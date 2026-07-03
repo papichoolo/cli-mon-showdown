@@ -290,7 +290,11 @@ def _new_battle_state() -> Dict[str, BattleSide]:
             "hp_pct": None,
             "status": None,
             "fainted": False,
+            "conditions": [],
         },
+        "field": [],
+        "weather": None,
+        "ended": False,
     }
 
 
@@ -371,6 +375,54 @@ def _update_battle_state_from_line(
         error_msg = parts[2]
         debug_print(f"Battle error detected: {error_msg}", "BATTLE_STATE")
         error_detected = True
+
+    # Handle win/tie
+    if tag in ("win", "tie"):
+        battle["ended"] = True
+        changed = True
+
+    # Handle weather and field conditions
+    if tag == "-weather" and len(parts) >= 3:
+        weather = parts[2]
+        if weather == "none" or weather == "upkeep":
+            pass # Keep it, or maybe 'none' clears it
+            if weather == "none":
+                battle["weather"] = None
+        else:
+            battle["weather"] = weather
+        changed = True
+
+    if tag == "-fieldstart" and len(parts) >= 3:
+        effect = parts[2].split("move: ")[-1] if "move: " in parts[2] else parts[2]
+        if "field" not in battle: battle["field"] = []
+        if effect not in battle["field"]:
+            battle["field"].append(effect)
+            changed = True
+            
+    if tag == "-fieldend" and len(parts) >= 3:
+        effect = parts[2].split("move: ")[-1] if "move: " in parts[2] else parts[2]
+        if "field" not in battle: battle["field"] = []
+        if effect in battle["field"]:
+            battle["field"].remove(effect)
+            changed = True
+
+    if tag == "-sidestart" and len(parts) >= 4:
+        side = parts[2][:2] # p1 or p2
+        effect = parts[3].split("move: ")[-1] if "move: " in parts[3] else parts[3]
+        if side in battle:
+            if "conditions" not in battle[side]: battle[side]["conditions"] = []
+            if effect not in battle[side]["conditions"]:
+                battle[side]["conditions"].append(effect)
+                changed = True
+
+    if tag == "-sideend" and len(parts) >= 4:
+        side = parts[2][:2]
+        effect = parts[3].split("move: ")[-1] if "move: " in parts[3] else parts[3]
+        if side in battle:
+            if "conditions" not in battle[side]: battle[side]["conditions"] = []
+            if effect in battle[side]["conditions"]:
+                battle[side]["conditions"].remove(effect)
+                changed = True
 
     # Handle successful moves (reset AI error count)
     if tag == "move" and len(parts) >= 3:
@@ -1193,10 +1245,14 @@ def _create_agent_observation(
 
     # Extract terrain specifically from field conditions if present
     terrain = None
-    for key in field_conditions.keys():
+    for key in battle.get("field", []):
         if "terrain" in key.lower():
             terrain = key
             break
+
+    # Resolve active side for side_conditions
+    my_side = ai_req.get("side", {}).get("id", "p1")
+    my_conditions = battle.get(my_side, {}).get("conditions", [])
 
     # Create the complete observation
     observation = {
@@ -1215,11 +1271,12 @@ def _create_agent_observation(
         "is_forced_switch": is_forced_switch,
         "can_move": bool(ai_req.get("active")) and not ai_req.get("wait"),
         "must_wait": bool(ai_req.get("wait")),
-        "side_conditions": side_data.get("sideConditions", {}),
-        "field_conditions": field_conditions,
-        "weather": weather,
+        "side_conditions": my_conditions,
+        "field_conditions": battle.get("field", []),
+        "weather": battle.get("weather", None),
         "terrain": terrain,
         "pseudoWeather": ai_req.get("pseudoWeather", []),
+        "ended": battle.get("ended", False)
     }
 
     return observation
@@ -1263,6 +1320,14 @@ def _llm_agent_decision(
         f"PseudoWeather: {observation.get('pseudoWeather')}\n"
     )
     debug_print(f"LLM agent prompt context:\n{prompt_context}", "LLM_AGENT_PROMPT")
+
+    if observation.get("ended", False):
+        debug_print("LLM agent: Battle ended, doing nothing.", "LLM_AGENT")
+        return {
+            "action_type": "wait",
+            "choice": None,
+            "reasoning": "Battle is over",
+        }
 
     # Forced switch scenarios are now handled by the LLM natively.
 

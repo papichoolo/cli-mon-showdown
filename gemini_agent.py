@@ -130,7 +130,7 @@ def _run_calc(attacker_name: str, defender_name: str, move_name: str) -> str:
 class GeminiPokemonAgent:
     """Pokemon battle agent powered by Langchain and OpenRouter."""
     
-    def __init__(self, api_key: Optional[str] = None, model_name: str = "openai/gpt-5.4-mini"):
+    def __init__(self, api_key: Optional[str] = None, model_name: str = "poolside/laguna-xs-2.1:free"):
         """
         Initialize the Langchain Pokemon agent.
         
@@ -169,7 +169,7 @@ class GeminiPokemonAgent:
         # Use ChatOpenRouter as requested
         try:
             self.llm = ChatOpenRouter(
-                model=self.model_name.replace("openrouter:", ""),
+                model=self.model_name,
                 temperature=0,
             )
         except Exception as e:
@@ -364,13 +364,78 @@ class GeminiPokemonAgent:
         # Strategic instructions
         prompt_parts.append("""
 --- INSTRUCTIONS ---
-Analyze the current battle state, focusing on the expected damage calculations provided.
+Analyze the current battle state and the simulated scenarios provided below.
 Choose the optimal move or switch to maximize your chances of winning.
 If a move secures a KO, prioritize it unless it exposes you to an immediate counterattack.
 If you are at a disadvantage, switch to a better defensive check.
 """)
         
         return '\n'.join(prompt_parts)
+        
+    def predict_opponent_move(self, observation: dict, opponent_knowledge: Optional[dict] = None) -> str:
+        """Use LLM to predict the opponent's single most likely move based on sets and state."""
+        prompt = "Based on the current state, predict the SINGLE most likely move the opponent will use this turn.\n"
+        
+        opponent = observation.get('opponent_active', {})
+        active = None
+        if observation.get('bench'):
+            for pk in observation['bench']:
+                if pk.get('active'):
+                    active = pk
+                    break
+        
+        prompt += f"Our Active: {active.get('species', 'Unknown') if active else 'Unknown'}\n"
+        prompt += f"Opponent Active: {opponent.get('species', 'Unknown')}\n"
+        
+        sanitized_species = opponent.get('species', '').lower().replace(" ", "").replace("-", "")
+        if hasattr(self, 'random_sets') and sanitized_species in self.random_sets:
+            possible_sets = self.random_sets[sanitized_species].get("sets", [])
+            all_moves = set()
+            for s in possible_sets:
+                for m in s.get("movepool", []):
+                    all_moves.add(m)
+            if all_moves:
+                prompt += f"Opponent Possible Moves: {', '.join(all_moves)}\n"
+        
+        prompt += "\nRespond with ONLY the EXACT NAME of the predicted move, nothing else."
+        
+        try:
+            result = self.llm.invoke([("user", prompt)])
+            content = getattr(result, "content", str(result))
+            predicted_move = content.strip().split('\n')[0].strip(' "\'')
+            return predicted_move
+        except Exception as e:
+            print(f"Failed to predict opponent move: {e}")
+            return "Tackle" # Fallback
+            
+    def simulate_scenario(self, p1_name: str, p1_action: dict, p2_name: str, p2_action: dict, p1_hp: float, p2_hp: float) -> str:
+        """Call simulate_turn.js to simulate the outcome of the turn."""
+        payload = {
+            "gen": 9,
+            "p1": {
+                "name": p1_name,
+                "hp_percent": p1_hp,
+                "action": p1_action
+            },
+            "p2": {
+                "name": p2_name,
+                "hp_percent": p2_hp,
+                "action": p2_action
+            }
+        }
+        
+        try:
+            result = subprocess.run(
+                ['node', 'simulate_turn.js', json.dumps(payload)],
+                capture_output=True,
+                text=True
+            )
+            if result.returncode == 0:
+                data = json.loads(result.stdout)
+                return f"{data['log']} (Result HP - Us: {data['p1_hp']}%, Them: {data['p2_hp']}%)"
+        except Exception as e:
+            pass
+        return "Simulation failed."
     
     def get_battle_decision(self, observation: dict, team_knowledge: Optional[dict] = None, compact_log: str = "", opponent_knowledge: Optional[dict] = None) -> dict:
         """
@@ -384,8 +449,68 @@ If you are at a disadvantage, switch to a better defensive check.
             Decision dictionary with action_type, choice, and reasoning
         """
         try:
-            # Create the prompt
+            print("[DEBUG] create_battle_prompt...")
+            # Create the base prompt
             prompt = self.create_battle_prompt(observation, team_knowledge, compact_log, opponent_knowledge)
+            
+            print("[DEBUG] PHASE 2 start...")
+            # PHASE 2: Tree Search Sampling (1-Ply Simulator)
+            # Skip simulation on forced switch since opponent doesn't move
+            if not observation.get('is_forced_switch', False):
+                print("[DEBUG] predict_opponent_move...")
+                predicted_move = self.predict_opponent_move(observation, opponent_knowledge)
+                print(f"[DEBUG] predict_opponent_move done: {predicted_move}")
+                prompt += f"\n\n--- 1-PLY SIMULATIONS ---\nOpponent is predicted to use: {predicted_move}\n"
+                
+                # Get active names and HPs
+                our_active = "Unknown"
+                our_hp = 100
+                if observation.get('bench'):
+                    for pk in observation['bench']:
+                        if pk.get('active'):
+                            our_active = pk.get('species', 'Unknown')
+                            hp_info = pk.get('hp_info', {})
+                            our_hp = hp_info.get('hp_percent', 100)
+                            break
+                            
+                opp_active = observation.get('opponent_active', {}).get('species', 'Unknown')
+                opp_hp = observation.get('opponent_active', {}).get('hp_percent', 100)
+                
+                # Simulate our moves
+                moves = observation.get('available_moves', [])
+                for m in moves:
+                    if not m.get('disabled', False):
+                        move_name = m.get('move', m.get('id', 'Unknown'))
+                        print(f"[DEBUG] simulating move: {move_name}")
+                        sim_result = self.simulate_scenario(
+                            our_active, {"type": "move", "name": move_name},
+                            opp_active, {"type": "move", "name": predicted_move},
+                            our_hp, opp_hp
+                        )
+                        prompt += f"\nIf we use {move_name}:\n{sim_result}"
+                
+                # Simulate our switches
+                switches = observation.get('available_switches', [])
+                for s in switches:
+                    switch_name = s.get('species', 'Unknown')
+                    # Parse switch HP (e.g., "85/100" or just assume 100)
+                    switch_hp = 100
+                    hp_status = s.get('hp_status', '')
+                    if '/' in hp_status:
+                        try:
+                            parts = hp_status.replace('%', '').split('/')
+                            switch_hp = (float(parts[0]) / float(parts[1])) * 100
+                        except:
+                            pass
+                            
+                    sim_result = self.simulate_scenario(
+                        our_active, {"type": "switch", "name": switch_name, "hp_percent": switch_hp},
+                        opp_active, {"type": "move", "name": predicted_move},
+                        our_hp, opp_hp
+                    )
+                    prompt += f"\nIf we switch to {switch_name}:\n{sim_result}"
+                
+                prompt += "\n"
             
             system_instruction = """You are an expert Pokemon battle strategist. Analyze the current battle state and choose the best action.
             IMPORTANT: You must respond with ONLY a valid JSON object in this exact format:
@@ -400,46 +525,23 @@ If you are at a disadvantage, switch to a better defensive check.
             - reasoning: A brief strategic explanation (max 50 words)
             Do not include any other text or formatting. Only the JSON object."""
             
-            if showdown_wrapper.DEBUG:
-                print(f"[{'='*20} AGENT TEAM {'='*20}]")
-                active = observation.get('active', 'Unknown')
-                print(f"Active: {active}")
-                print(f"Bench: {observation.get('bench', [])}")
-                print(f"[{'='*20} OPPONENT KNOWLEDGE {'='*20}]")
-                print(json.dumps(opponent_knowledge, indent=2, default=lambda o: list(o) if isinstance(o, set) else o) if opponent_knowledge else "None")
-                print(f"{'='*60}")
+            print(f"[{'='*20} AGENT TEAM {'='*20}]")
+            active = observation.get('active', 'Unknown')
+            print(f"Active: {active}")
+            print(f"Bench: {observation.get('bench', [])}")
+            print(f"[{'='*20} OPPONENT KNOWLEDGE {'='*20}]")
+            print(json.dumps(opponent_knowledge, indent=2, default=lambda o: list(o) if isinstance(o, set) else o) if opponent_knowledge else "None")
+            print(f"{'='*60}")
             
-            # Using the user's snippet logic
+            # Using direct LLM with JSON output
             try:
-                # Dynamically try to use the create_agent wrapper if available
-                agent = create_agent(
-                    model=self.llm,
-                    tools=[submit_decision],
-                    system_prompt=self.system_prompt
-                )
-                
-                result = agent.invoke(
-                    {"messages": [{"role": "system", "content": system_instruction}, {"role": "user", "content": prompt}]}
-                )
-                
-                # Extract the tool output or final response
-                content = getattr(result["messages"][-1], "content_blocks", result["messages"][-1].content)
-                if isinstance(content, list):
-                    response_text = "".join(
-                        block.get("text", "") if isinstance(block, dict) else str(block) 
-                        for block in content
-                    )
-                else:
-                    response_text = str(content)
-                
-            except (NameError, ImportError, Exception) as e:
-                # If create_agent isn't quite working or langchain-openrouter is missing, use the standard fallback
-                print(f"Agent invoke failed or create_agent missing, falling back to direct LLM: {e}")
                 messages = [
                     ("system", system_instruction),
                     ("user", prompt)
                 ]
+                print("[DEBUG] Invoking direct LLM...")
                 result = self.llm.invoke(messages)
+                print("[DEBUG] Direct LLM invoke done.")
                 content = getattr(result, "content", str(result))
                 if isinstance(content, list):
                     response_text = "".join(
@@ -449,18 +551,11 @@ If you are at a disadvantage, switch to a better defensive check.
                 else:
                     response_text = str(content)
             
-            if showdown_wrapper.DEBUG:
-                # Try to extract tool calls if using agent
-                if isinstance(result, dict) and "messages" in result:
-                    tool_calls = []
-                    for msg in result["messages"]:
-                        if hasattr(msg, "tool_calls") and msg.tool_calls:
-                            for tc in msg.tool_calls:
-                                tool_calls.append(f"{tc.get('name', 'unknown')}({tc.get('args', {})})")
-                    if tool_calls:
-                        print(f"[{'='*20} FUNCTIONS USED {'='*20}]\n" + "\n".join(tool_calls) + f"\n{'='*58}")
-                
-                print(f"[{'='*20} LLM RAW RESPONSE {'='*20}]\n{response_text}\n{'='*58}")
+            except Exception as e:
+                print(f"Agent invoke failed: {e}")
+                response_text = '{"action_type": "move", "choice": 1, "reasoning": "Fallback"}'
+            
+            print(f"[{'='*20} LLM RAW RESPONSE {'='*20}]\n{response_text}\n{'='*58}")
                 
             # Parse the text response which should contain JSON from both methods
             thoughts = "Model Thought:\n" + response_text
@@ -605,7 +700,7 @@ If you are at a disadvantage, switch to a better defensive check.
 # Global agent instance
 _agent_instance = None
 
-def init_gemini_agent(api_key: Optional[str] = None, model_name: str = "openai/gpt-4o") -> GeminiPokemonAgent:
+def init_gemini_agent(api_key: Optional[str] = None, model_name: str = "openai/gpt-5.4-mini") -> GeminiPokemonAgent:
     """
     Initialize the global agent instance. (Called gemini_agent for backward compatibility)
     

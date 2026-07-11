@@ -25,6 +25,7 @@ class RemoteShowdownWrapper:
         self.current_room = ""
         self.bot_side = None # "p1" or "p2"
         self.logged_in = False
+        self.in_battle = False  # True once we're inside a battle room
         
         self.thread = threading.Thread(target=self._run_loop, daemon=True)
         self.thread.start()
@@ -41,42 +42,61 @@ class RemoteShowdownWrapper:
         self.loop.run_until_complete(self._connect_and_listen())
 
     async def _connect_and_listen(self):
-        async with websockets.connect(self.ws_url) as ws:
-            self.ws = ws
-            debug_print("Connected to WebSocket", "REMOTE")
+        self._closed = False
+        while not getattr(self, '_closed', False):
             try:
-                async for message in ws:
-                    debug_print(f"Received: {message}", "REMOTE")
-                    lines = message.split('\n')
-                    
-                    # Track current room
-                    if lines[0].startswith(">battle-"):
-                        self.current_room = lines[0][1:] # e.g. "battle-gen9randombattle-xxxx"
-                    
-                    for line in lines:
-                        if line.startswith("|challstr|"):
-                            challstr = line[10:]
-                            self._login(challstr)
+                async with websockets.connect(self.ws_url, ping_interval=None) as ws:
+                    self.ws = ws
+                    # Reset per-connection state
+                    self.logged_in = False
+                    debug_print("Connected to WebSocket", "REMOTE")
+                    try:
+                        async for message in ws:
+                            debug_print(f"Received: {message}", "REMOTE")
+                            lines = message.split('\n')
                             
-                        # Detect which side we are
-                        if line.startswith("|player|"):
-                            parts = line.split("|")
-                            if len(parts) >= 4:
-                                side = parts[2]
-                                name = parts[3]
-                                if name.lower() == self.username.lower():
-                                    self.bot_side = side
-                                    debug_print(f"We are {self.bot_side}", "REMOTE")
+                            # Track current room
+                            if lines[0].startswith(">battle-"):
+                                room = lines[0][1:]
+                                if room != self.current_room:
+                                    self.current_room = room
+                                    self.in_battle = True
+                                    debug_print(f"In battle room: {room}", "REMOTE")
+                            
+                            for line in lines:
+                                if line.startswith("|challstr|"):
+                                    challstr = line[10:]
+                                    self._login(challstr)
+                                    
+                                # Detect which side we are
+                                if line.startswith("|player|"):
+                                    parts = line.split("|")
+                                    if len(parts) >= 4:
+                                        side = parts[2]
+                                        name = parts[3]
+                                        if name.lower() == self.username.lower():
+                                            self.bot_side = side
+                                            debug_print(f"We are {self.bot_side}", "REMOTE")
 
-                        # Handle |updateuser| to know when login succeeded
-                        if line.startswith("|updateuser|"):
-                            parts = line.split("|")
-                            if len(parts) >= 3 and parts[2].strip().lower() == self.username.lower():
-                                self.logged_in = True
-                    
-                    self.q.put(message)
+                                # Handle |updateuser| to know when login succeeded
+                                if line.startswith("|updateuser|"):
+                                    parts = line.split("|")
+                                    if len(parts) >= 3 and parts[2].strip().lower() == self.username.lower():
+                                        self.logged_in = True
+
+                                # Battle ended – reset in_battle so reconnect can search again
+                                if line.startswith("|win|") or line.startswith("|tie|"):
+                                    self.in_battle = False
+                            
+                            self.q.put(message)
+                    except Exception as e:
+                        debug_print(f"WebSocket closed inner: {e}", "REMOTE")
             except Exception as e:
-                debug_print(f"WebSocket closed: {e}", "REMOTE")
+                debug_print(f"WebSocket connection failed: {e}", "REMOTE")
+            
+            if not getattr(self, '_closed', False):
+                debug_print("Reconnecting in 2 seconds...", "REMOTE")
+                await asyncio.sleep(2)
 
     def _login(self, challstr):
         debug_print("Attempting login...", "REMOTE")
@@ -106,6 +126,10 @@ class RemoteShowdownWrapper:
 
     def _start_searching(self):
         if self.logged_in:
+            # Don't search if already in an active battle
+            if self.in_battle:
+                debug_print("Already in a battle, skipping search", "REMOTE")
+                return
             debug_print(f"Searching for {self.formatid}", "REMOTE")
             self.send(f"|/search {self.formatid}")
         else:
@@ -187,6 +211,7 @@ class RemoteShowdownWrapper:
         return lines
 
     def close(self):
+        self._closed = True
         if self.ws:
             asyncio.run_coroutine_threadsafe(self.ws.close(), self.loop)
         time.sleep(0.5)

@@ -6,6 +6,7 @@
     <title>CLI-Mon Showdown Web</title>
     <link rel="stylesheet" href="./style.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700;900&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
   </head>
   <body>
     <div id="app">
@@ -93,6 +94,8 @@
                 <summary>Model Output (Raw)</summary>
                 <div id="ai-thoughts" class="thoughts-box"><span class="muted">Awaiting observation...</span></div>
               </details>
+
+
               
               <div class="reasoning-box">
                 <span class="label">FINAL DECISION:</span>
@@ -111,8 +114,17 @@
           </div>
         </section>
 
+        <!-- Right: Graph Panel -->
+        <section class="glass-panel graph-panel" style="display: flex; flex-direction: column;">
+          <h2 style="font-size: 1.2rem; margin-bottom: 16px; background: linear-gradient(to right, #a78bfa, #f472b6); -webkit-background-clip: text; color: transparent;">Search Tree Graph</h2>
+          <div id="ai-graph-scroll" style="flex:1; overflow-y:auto; overflow-x:hidden; border-radius:8px; background:white;">
+            <div id="ai-graph" style="padding:12px;"></div>
+          </div>
+        </section>
+
       </main>
     </div>
     <script type="module" src="./main.js"></script>
   </body>
 </html>
+

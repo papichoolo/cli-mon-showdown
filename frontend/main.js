@@ -40,6 +40,31 @@ function addLog(text, type = 'normal') {
   logContainer.scrollTop = logContainer.scrollHeight;
 }
 
+function showOpponentBanner(text, kind) {
+  let banner = document.getElementById('opponent-banner');
+  if (!banner) {
+    banner = document.createElement('div');
+    banner.id = 'opponent-banner';
+    banner.style.cssText = 'position:fixed;top:16px;left:50%;transform:translateX(-50%);z-index:9999;padding:10px 24px;border-radius:10px;font-weight:700;font-size:0.9rem;box-shadow:0 4px 20px rgba(0,0,0,0.4);transition:opacity 0.3s;';
+    document.body.appendChild(banner);
+  }
+  banner.textContent = text;
+  if (kind === 'warning') {
+    banner.style.background = 'linear-gradient(135deg,#f59e0b,#ef4444)';
+    banner.style.color = '#fff';
+  } else {
+    banner.style.background = 'linear-gradient(135deg,#10b981,#059669)';
+    banner.style.color = '#fff';
+  }
+  banner.style.opacity = '1';
+  banner.style.display = 'block';
+}
+
+function hideOpponentBanner() {
+  const banner = document.getElementById('opponent-banner');
+  if (banner) banner.style.display = 'none';
+}
+
 function updateHpBar(fillEl, hp, maxhp, pct) {
   let percentage = pct;
   if (hp !== undefined && maxhp !== undefined && maxhp > 0) percentage = (hp / maxhp) * 100;
@@ -237,6 +262,14 @@ connectBtn.onclick = () => {
     } else if (msg.type === 'win') {
       addLog(`🎉 ${msg.winner} won the battle! 🎉`, 'system');
       newBattleBtn.classList.remove('hidden');
+      hideOpponentBanner();
+    } else if (msg.type === 'opponent_status') {
+      if (msg.status === 'disconnected') {
+        showOpponentBanner(`⚡ Opponent disconnected — ${msg.message}`, 'warning');
+      } else if (msg.status === 'reconnected') {
+        showOpponentBanner(`✅ Opponent reconnected — ${msg.message}`, 'ok');
+        setTimeout(hideOpponentBanner, 4000);
+      }
     } else if (msg.type === 'state_sync') {
       updateState(msg.battle);
       if (!isRemote && msg.p1_request) {
@@ -251,6 +284,42 @@ connectBtn.onclick = () => {
       aiThoughts.textContent = msg.thoughts || 'No thoughts generated.';
       aiThoughts.scrollTop = aiThoughts.scrollHeight;
       aiReasoning.textContent = msg.reasoning || '—';
+
+      if (msg.simulations && msg.simulations.length > 0 && window.mermaid) {
+          let predicted = msg.predicted_move || 'Unknown Move';
+          // LR layout: tree flows top-to-bottom within the tall column
+          let graphDef = `graph LR\n`;
+          graphDef += `  State(("Turn"))\n`;
+          graphDef += `  OppMove["Opp: ${predicted}"]\n`;
+          graphDef += `  State --> OppMove\n`;
+
+          msg.simulations.slice(0, 5).forEach((sim, i) => {
+              let action = sim.action.replace(/["'<>]/g, '').trim();
+              let result = sim.result.replace(/["'<>]/g, '').trim();
+              // Try to extract just the HP numbers
+              let hpMatch = result.match(/Us:\s*([\d.]+%?).*?Them:\s*([\d.]+%?)/);
+              let label = hpMatch ? `Us:${hpMatch[1]} Them:${hpMatch[2]}` : result.slice(0, 40);
+              graphDef += `  OppMove --> N${i}["${action}\n${label}"]\n`;
+          });
+
+          const graphDiv = document.getElementById('ai-graph');
+          if (graphDiv) {
+              mermaid.render('mermaid-graph-' + Date.now(), graphDef).then(res => {
+                  graphDiv.innerHTML = res.svg;
+                  // Make SVG stretch to fill the full column width
+                  const svgEl = graphDiv.querySelector('svg');
+                  if (svgEl) {
+                      svgEl.style.width = '100%';
+                      svgEl.style.height = 'auto';
+                      svgEl.style.maxWidth = 'none';
+                      svgEl.removeAttribute('width');
+                  }
+              }).catch(err => {
+                  console.error("Mermaid render error:", err);
+                  graphDiv.textContent = "Error rendering graph.";
+              });
+          }
+      }
     }
   };
 
@@ -278,6 +347,10 @@ newBattleBtn.onclick = () => {
   aiThoughts.innerHTML = '<span class="muted">Awaiting observation...</span>';
   aiReasoning.textContent = '—';
   aiStatus.textContent = 'Monitoring battle state...';
+  
+  const graphDiv = document.getElementById('ai-graph');
+  if (graphDiv) graphDiv.innerHTML = '';
   connectBtn.disabled = false;
   connectBtn.textContent = 'Connect & Start Battle';
 };
+

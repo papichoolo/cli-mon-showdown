@@ -160,6 +160,15 @@ class BattleSession:
                         winner = line.split("|win|", 1)[1].strip() or "Unknown"
                         self._send({"type": "win", "winner": winner})
 
+                    # Opponent disconnect / timer events
+                    if line.startswith("|inactive|"):
+                        msg_text = line.split("|inactive|", 1)[1].strip()
+                        self._send({"type": "opponent_status", "status": "disconnected", "message": msg_text})
+
+                    if line.startswith("|inactiveoff|"):
+                        msg_text = line.split("|inactiveoff|", 1)[1].strip()
+                        self._send({"type": "opponent_status", "status": "reconnected", "message": msg_text})
+
                 # Auto-complete team preview for the AI side (remote: our side)
                 for side in ("p1", "p2"):
                     req = self.requests.get(side)
@@ -244,6 +253,8 @@ class BattleSession:
                                     "action_type": decision.get("action_type"),
                                     "choice": decision.get("choice"),
                                     "turn": self.current_turn,
+                                    "simulations": decision.get("simulations", []),
+                                    "predicted_move": decision.get("predicted_move", ""),
                                 }
                             )
                             command = cli._translate_agent_decision(decision, ai_req)

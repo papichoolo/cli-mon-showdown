@@ -453,12 +453,16 @@ If you are at a disadvantage, switch to a better defensive check.
             # Create the base prompt
             prompt = self.create_battle_prompt(observation, team_knowledge, compact_log, opponent_knowledge)
             
+            simulations = []
+            predicted_move_name = ""
+
             print("[DEBUG] PHASE 2 start...")
             # PHASE 2: Tree Search Sampling (1-Ply Simulator)
             # Skip simulation on forced switch since opponent doesn't move
             if not observation.get('is_forced_switch', False):
                 print("[DEBUG] predict_opponent_move...")
                 predicted_move = self.predict_opponent_move(observation, opponent_knowledge)
+                predicted_move_name = predicted_move
                 print(f"[DEBUG] predict_opponent_move done: {predicted_move}")
                 prompt += f"\n\n--- 1-PLY SIMULATIONS ---\nOpponent is predicted to use: {predicted_move}\n"
                 
@@ -488,6 +492,7 @@ If you are at a disadvantage, switch to a better defensive check.
                             our_hp, opp_hp
                         )
                         prompt += f"\nIf we use {move_name}:\n{sim_result}"
+                        simulations.append({"action": f"Move: {move_name}", "result": sim_result})
                 
                 # Simulate our switches
                 switches = observation.get('available_switches', [])
@@ -509,6 +514,7 @@ If you are at a disadvantage, switch to a better defensive check.
                         our_hp, opp_hp
                     )
                     prompt += f"\nIf we switch to {switch_name}:\n{sim_result}"
+                    simulations.append({"action": f"Switch: {switch_name}", "result": sim_result})
                 
                 prompt += "\n"
             
@@ -564,6 +570,10 @@ If you are at a disadvantage, switch to a better defensive check.
             # Truncate prompt to ~1000 characters for the UI
             truncated_prompt = prompt[:1000] + "\n... [TRUNCATED]" if len(prompt) > 1000 else prompt
             decision_dict['input_prompt'] = truncated_prompt
+            
+            # Pass simulations back for the frontend
+            decision_dict['simulations'] = simulations
+            decision_dict['predicted_move'] = predicted_move_name
             
             return decision_dict
                 
